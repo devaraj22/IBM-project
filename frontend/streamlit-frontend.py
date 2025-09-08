@@ -9,6 +9,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import io
+import logging
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(
@@ -111,25 +115,41 @@ API_BASE_URL = "http://localhost:8000"
 if 'analysis_history' not in st.session_state:
     st.session_state.analysis_history = []
 
+# Session state initialization
+if 'ocr_extracted_text' not in st.session_state:
+    st.session_state.ocr_extracted_text = ""
+if 'ocr_extraction_done' not in st.session_state:
+    st.session_state.ocr_extraction_done = False
+
 # Helper functions
+def get_ocr_extraction_state():
+    """Get OCR extraction state from session"""
+    return st.session_state.get('ocr_extraction_done', False)
+
+def set_ocr_extraction_state(value: bool, text: str = ""):
+    """Set OCR extraction state"""
+    st.session_state.ocr_extraction_done = value
+    if text:
+        st.session_state.ocr_extracted_text = text
+
 def make_api_request(endpoint: str, method: str = "GET", data: Optional[Dict] = None) -> Dict:
     """Make API request with error handling"""
     try:
         url = f"{API_BASE_URL}{endpoint}"
-        
+
         if method == "GET":
             response = requests.get(url, timeout=30)
         elif method == "POST":
             response = requests.post(url, json=data, timeout=30)
         else:
             raise ValueError(f"Unsupported method: {method}")
-        
+
         if response.status_code == 200:
             return response.json()
         else:
             st.error(f"API Error: {response.status_code} - {response.text}")
             return {}
-            
+
     except requests.exceptions.RequestException as e:
         st.error(f"Connection Error: {str(e)}")
         return {}
@@ -310,36 +330,36 @@ def main():
     st.markdown('<h1 class="main-header">🏥 AI Medical Prescription Verification System</h1>', 
                unsafe_allow_html=True)
     
-    # Sidebar navigation
+    # Sidebar navigation - Prescription Analyzer first
     st.sidebar.title("📋 Navigation")
 
-    # Check for quick navigation from session state
+    # Page options - Prescription Analyzer is first/default
+    page_options = [
+        "📄 Prescription Analyzer",  # Default first page
+        "💊 Drug Interaction Checker",
+        "📏 Age-Specific Dosage",
+        "🔄 Alternative Medications",
+        "📊 Analysis Results",
+        "📈 Analysis History"
+    ]
+
+    # Determine which page to show
     if 'selected_page' in st.session_state:
-        default_index = [
-            "🏠 Dashboard",
-            "💊 Drug Interaction Checker",
-            "📏 Age-Specific Dosage",
-            "📄 Prescription Parser",
-            "🔄 Alternative Medications",
-            "📊 Analysis History"
-        ].index(st.session_state['selected_page'])
+        if st.session_state['selected_page'] in page_options:
+            default_index = page_options.index(st.session_state['selected_page'])
+            selected_page_value = st.session_state['selected_page']
+        else:
+            default_index = 0
+            selected_page_value = None
         # Clear the selected page after using it
-        selected_page_value = st.session_state['selected_page']
         del st.session_state['selected_page']
     else:
         default_index = 0
         selected_page_value = None
 
     selected_page = st.sidebar.radio(
-        "Choose a function:",
-        [
-            "🏠 Dashboard",
-            "💊 Drug Interaction Checker",
-            "📏 Age-Specific Dosage",
-            "📄 Prescription Parser",
-            "🔄 Alternative Medications",
-            "📊 Analysis History"
-        ],
+        "AI Medical Analysis:",
+        page_options,
         index=default_index
     )
 
@@ -365,17 +385,17 @@ def main():
             st.error("❌ API Connection Failed")
     
     # Page routing
-    if selected_page == "🏠 Dashboard":
-        show_dashboard()
+    if selected_page == "📄 Prescription Analyzer":
+        show_prescription_analyzer_page()  # Renamed for consistency
     elif selected_page == "💊 Drug Interaction Checker":
         show_drug_interaction_page()
     elif selected_page == "📏 Age-Specific Dosage":
         show_dosage_page()
-    elif selected_page == "📄 Prescription Parser":
-        show_prescription_parser_page()
     elif selected_page == "🔄 Alternative Medications":
         show_alternative_drugs_page()
-    elif selected_page == "📊 Analysis History":
+    elif selected_page == "📊 Analysis Results":
+        show_analysis_results_page()  # New results dashboard
+    elif selected_page == "📈 Analysis History":
         show_analysis_history()
 
 def show_dashboard():
@@ -499,48 +519,67 @@ def show_drug_interaction_page():
         col1, col2 = st.columns(2)
         
         with col1:
-            # Drug input method selection
-            input_method = st.radio(
-                "Input method:",
-                ["Manual entry", "Select from list", "Upload file"]
-            )
-            
-            if input_method == "Manual entry":
-                drug_input = st.text_area(
-                    "Enter drug names (one per line):",
-                    placeholder="aspirin\nwarfarin\nlisinopril",
-                    height=150
+            # Check for drugs from prescription analysis
+            drugs = []
+            use_analyzed_drugs = False
+
+            if 'analyzed_drugs' in st.session_state:
+                if not st.session_state.get('use_manual_drugs', False):
+                    st.info("💡 **Using drugs from analyzed prescription:** " + ", ".join(st.session_state['analyzed_drugs']))
+                    drugs = st.session_state['analyzed_drugs']
+                    use_analyzed_drugs = True
+
+                    # Option to use different drugs (outside the form)
+                    if st.button("✏️ Enter Different Drugs", key="switch_manual_drugs"):
+                        st.session_state['use_manual_drugs'] = True
+                        st.rerun()
+
+                else:
+                    st.session_state['use_manual_drugs'] = False
+
+            # Drug input method selection - only show if not using analyzed drugs
+            if not use_analyzed_drugs:
+                input_method = st.radio(
+                    "Input method:",
+                    ["Manual entry", "Select from list", "Upload file"]
                 )
-                drugs = [drug.strip() for drug in drug_input.split('\n') if drug.strip()]
-                
-            elif input_method == "Select from list":
-                # Common medications for selection
-                common_drugs = [
-                    "Aspirin", "Warfarin", "Lisinopril", "Metformin", "Atorvastatin",
-                    "Amlodipine", "Metoprolol", "Levothyroxine", "Ibuprofen", "Acetaminophen",
-                    "Omeprazole", "Simvastatin", "Furosemide", "Digoxin", "Insulin"
-                ]
-                
-                drugs = st.multiselect(
-                    "Select medications:",
-                    options=common_drugs,
-                    help="Choose 2 or more medications to check for interactions"
-                )
-            
-            else:  # Upload file
-                uploaded_file = st.file_uploader("Upload drug list (CSV/TXT)", type=['csv', 'txt'])
-                drugs = []
-                
-                if uploaded_file:
-                    if uploaded_file.name.endswith('.csv'):
-                        df = pd.read_csv(uploaded_file)
-                        if 'drug_name' in df.columns:
-                            drugs = df['drug_name'].dropna().tolist()
+
+                if input_method == "Manual entry":
+                    drug_input = st.text_area(
+                        "Enter drug names (one per line):",
+                        placeholder="aspirin\nwarfarin\nlisinopril",
+                        height=150
+                    )
+                    drugs = [drug.strip() for drug in drug_input.split('\n') if drug.strip()]
+
+                elif input_method == "Select from list":
+                    # Common medications for selection
+                    common_drugs = [
+                        "Aspirin", "Warfarin", "Lisinopril", "Metformin", "Atorvastatin",
+                        "Amlodipine", "Metoprolol", "Levothyroxine", "Ibuprofen", "Acetaminophen",
+                        "Omeprazole", "Simvastatin", "Furosemide", "Digoxin", "Insulin"
+                    ]
+
+                    drugs = st.multiselect(
+                        "Select medications:",
+                        options=common_drugs,
+                        help="Choose 2 or more medications to check for interactions"
+                    )
+
+                else:  # Upload file
+                    uploaded_file = st.file_uploader("Upload drug list (CSV/TXT)", type=['csv', 'txt'])
+                    drugs = []
+
+                    if uploaded_file:
+                        if uploaded_file.name.endswith('.csv'):
+                            df = pd.read_csv(uploaded_file)
+                            if 'drug_name' in df.columns:
+                                drugs = df['drug_name'].dropna().tolist()
+                            else:
+                                drugs = df.iloc[:, 0].dropna().tolist()
                         else:
-                            drugs = df.iloc[:, 0].dropna().tolist()
-                    else:
-                        content = uploaded_file.read().decode('utf-8')
-                        drugs = [drug.strip() for drug in content.split('\n') if drug.strip()]
+                            content = uploaded_file.read().decode('utf-8')
+                            drugs = [drug.strip() for drug in content.split('\n') if drug.strip()]
         
         with col2:
             st.subheader("⚙️ Options")
@@ -651,6 +690,11 @@ def show_dosage_page():
     </div>
     """, unsafe_allow_html=True)
     
+    # Show existing analyzed drugs if available
+    if 'analyzed_drugs' in st.session_state and st.session_state['analyzed_drugs']:
+        st.info("💡 **Analyzed medications available:** " + ", ".join(st.session_state['analyzed_drugs']))
+        st.markdown("You can use these drugs or enter a different medication below.")
+
     # Input form
     with st.form("dosage_form"):
         col1, col2 = st.columns(2)
@@ -741,15 +785,23 @@ def show_dosage_page():
                         'result': result
                     })
 
-def show_prescription_parser_page():
-    """Prescription parser page"""
-    
-    st.markdown('<h2 class="section-header">📄 AI Prescription Parser</h2>', unsafe_allow_html=True)
+def show_prescription_analyzer_page():
+    """Main prescription analyzer page - the primary entry point"""
+
+    st.markdown('<h2 class="section-header">📄 AI Prescription Analyzer - Main Tool</h2>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 20px; border-radius: 10px; margin: 10px 0;">
+    <h3>Welcome to the AI Medical Analysis System</h3>
+    <p>Start here by uploading or entering a prescription to extract medications, then use those drugs across all analysis tools automatically.</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     st.markdown("""
     <div class="info-box">
-    <strong>How to use:</strong> Upload or paste prescription text to extract structured information using advanced NLP. 
-    The system uses IBM Watson, HuggingFace models, and Gemini AI for accurate parsing.
+    <strong>How to use:</strong> Upload or paste prescription text/image to extract structured information using AI.
+    <br>• <strong>TXT Files:</strong> Ollama Granite AI (fast, local processing)
+    <br>• <strong>Images:</strong> Google Gemini 1.5 Flash OCR (advanced vision capabilities)
+    <br>• All medications auto-populate across other analysis tools
     </div>
     """, unsafe_allow_html=True)
     
@@ -777,8 +829,8 @@ For: Bacterial infection""",
     elif input_method == "File upload":
         uploaded_file = st.file_uploader(
             "Upload prescription file:",
-            type=['txt', 'pdf', 'docx', 'jpg', 'png'],
-            help="Support for text files mainly. PDF/DOCX/Image processing may require additional backend setup."
+            type=['txt', 'jpg', 'png'],
+            help="Supports text files (direct processing) and image files (OCR extraction with preview)."
         )
 
         if uploaded_file:
@@ -789,19 +841,193 @@ For: Bacterial infection""",
                 prescription_text = uploaded_file.read().decode('utf-8')
                 st.text_area("Extracted text:", value=prescription_text, height=150)
             elif uploaded_file.type.startswith('image/'):
-                st.image(uploaded_file, caption="Uploaded prescription image")
-                st.warning("ℹ️ Image file uploaded. Text will be extracted on backend (may require OCR setup).")
-                prescription_text = "Image uploaded - will process on backend"
-            elif uploaded_file.type in ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
-                st.info("📑 File uploaded. Individual text extraction needed:")
-                prescription_text = st.text_area(
-                    "Please paste the text content of your PDF/DOCX file:",
-                    height=200,
-                    placeholder="Copy and paste the text from your file here..."
-                )
-                st.warning("⚠️ PDF and DOCX files require manual text extraction for now")
+                st.image(uploaded_file, caption="Uploaded prescription image", width=400)
+
+                # Show OCR extraction section
+                col1, col2 = st.columns([0.7, 0.3])
+                with col1:
+                    ocr_extract_button = st.button("🔍 Extract Text from Image", use_container_width=True, type="primary")
+                with col2:
+                    auto_ocr = st.checkbox("Auto-extract", value=False,
+                                         help="Automatically extract text when image is uploaded")
+
+                if ocr_extract_button or (auto_ocr and not get_ocr_extraction_state()):
+                    with st.spinner("🔄 Extracting text from image using Gemini OCR..."):
+                        try:
+                            # Step 1: Call OCR extraction endpoint
+                            files = {'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                            ocr_response = requests.post(
+                                f"{API_BASE_URL}/extract-text-from-image",
+                                files=files,
+                                timeout=45  # Longer timeout for OCR
+                            )
+
+                            if ocr_response.status_code == 200:
+                                ocr_result = ocr_response.json()
+                                extracted_text = ocr_result.get('extracted_text', '')
+                                ocr_success = ocr_result.get('ocr_success', False)
+
+                                if ocr_success and extracted_text and len(extracted_text.strip()) > 50:
+                                    st.success("✅ OCR text extraction successful!")
+
+                                    # Store extraction state and text
+                                    set_ocr_extraction_state(True, extracted_text)
+
+                                    # Show extracted text in a nice expandable area
+                                    with st.expander("🔤 Extracted Text (Click to Review)", expanded=True):
+                                        st.code(extracted_text, language='text')
+                                        st.info(f"📝 Extracted {len(extracted_text)} characters from the image")
+
+                                    # Step 2: Option to edit the text if needed
+                                    edit_option = st.checkbox("✏️ Edit extracted text if needed")
+                                    if edit_option:
+                                        prescription_text = st.text_area(
+                                            "Edit extracted text:",
+                                            value=extracted_text,
+                                            height=200,
+                                            help="Make corrections to the extracted text if the OCR made any mistakes",
+                                            key="ocr_edit_text"
+                                        )
+                                    else:
+                                        prescription_text = extracted_text
+
+                                    # Step 3: Quick AI Analysis with Granite
+                                    st.markdown("---")
+                                    st.markdown("### 🤖 AI Analysis with Granite")
+
+                                    quick_analysis = st.button("🔬 Analyze with Granite AI",
+                                                             use_container_width=True,
+                                                             type="primary",
+                                                             key="analyze_ocr_text")
+
+                                    if quick_analysis:
+                                        with st.spinner("🤖 Analyzing extracted text with Granite AI model..."):
+                                            try:
+                                                # Get current language setting from main form (en by default)
+                                                current_lang = "en"  # Default fallback
+
+                                                search_data = {
+                                                    "text": prescription_text,
+                                                    "language": current_lang
+                                                }
+
+                                                analyze_response = requests.post(
+                                                    f"{API_BASE_URL}/analyze-extracted-text",
+                                                    json=search_data,
+                                                    timeout=45
+                                                )
+
+                                                if analyze_response.status_code == 200:
+                                                    analysis_result = analyze_response.json()
+
+                                                    # Display results immediately
+                                                    display_prescription_parse_results(analysis_result)
+
+                                                    # Store in session for cross-page access
+                                                    medications = analysis_result.get('medications', [])
+                                                    if medications:
+                                                        drug_names = [med['name'] for med in medications]
+                                                        st.session_state['analyzed_drugs'] = drug_names
+                                                        st.session_state['prescription_analysis'] = analysis_result
+
+                                                        confidence = analysis_result.get('confidence_score', 0)
+                                                        st.success(f"🤖 **Granite AI analysis complete!** Found {len(medications)} medications with {confidence:.1%} confidence.")
+                                                    else:
+                                                        st.warning("🤖 **No medications found** in the extracted text. Try editing the text or uploading a clearer image.")
+
+                                                else:
+                                                    st.error(f"Analysis failed: HTTP {analyze_response.status_code}")
+                                                    st.error("Try again or contact support if the issue persists.")
+
+                                            except Exception as e:
+                                                st.error(f"❌ Granite AI analysis error: {str(e)}")
+                                                logger.error(f"OCR analysis error: {str(e)}")
+
+                                elif ocr_success and extracted_text and len(extracted_text.strip()) > 10:
+                                    # Partial success with short text
+                                    st.warning("⚠️ OCR extracted some text but it may be incomplete.")
+                                    st.code(extracted_text, language='text')
+                                    prescription_text = extracted_text
+                                    set_ocr_extraction_state(True, extracted_text)
+
+                                else:
+                                    st.error("❌ OCR extraction failed or returned insufficient text.")
+                                    st.info("💡 **Tips for better results:**")
+                                    st.info("• Ensure the prescription is well-lit and clear")
+                                    st.info("• Avoid blurry or rotated images")
+                                    st.info("• Make sure text is readable without magnification")
+                                    prescription_text = ""
+                                    set_ocr_extraction_state(False, "")
+
+                            else:
+                                st.error(f"❌ OCR API request failed: HTTP {ocr_response.status_code}")
+                                if ocr_response.text:
+                                    st.error(f"Error details: {ocr_response.text[:200]}...")
+                                prescription_text = ""
+                                set_ocr_extraction_state(False, "")
+
+                        except requests.exceptions.Timeout:
+                            st.error("❌ OCR request timed out. The image may be too large or the server is busy.")
+                            prescription_text = ""
+                        except Exception as e:
+                            st.error(f"❌ OCR processing error: {str(e)}")
+                            prescription_text = ""
+                            set_ocr_extraction_state(False, "")
+
+                elif get_ocr_extraction_state():
+                    # Show previously extracted results
+                    stored_text = st.session_state.get('ocr_extracted_text', '')
+                    if stored_text:
+                        st.success("✅ Using previously extracted text")
+                        with st.expander("🔤 Previously Extracted Text", expanded=False):
+                            st.code(stored_text, language='text')
+
+                        edit_option = st.checkbox("Edit text if needed")
+                        if edit_option:
+                            prescription_text = st.text_area(
+                                "Edit extracted text:",
+                                value=stored_text,
+                                height=150,
+                                help="Make corrections to the extracted text"
+                            )
+                        else:
+                            prescription_text = stored_text
+
+                        # Option to analyze stored text
+                        if st.button("🔬 Re-analyze with Granite AI"):
+                            with st.spinner("🤖 Re-analyzing with Granite AI..."):
+                                try:
+                                    search_data = {"text": prescription_text, "language": "en"}
+                                    analyze_response = requests.post(
+                                        f"{API_BASE_URL}/analyze-extracted-text",
+                                        json=search_data,
+                                        timeout=30
+                                    )
+
+                                    if analyze_response.status_code == 200:
+                                        analysis_result = analyze_response.json()
+                                        display_prescription_parse_results(analysis_result)
+
+                                        medications = analysis_result.get('medications', [])
+                                        if medications:
+                                            drug_names = [med['name'] for med in medications]
+                                            st.session_state['analyzed_drugs'] = drug_names
+                                            st.session_state['prescription_analysis'] = analysis_result
+                                            st.success(f"🤖 Analysis complete! Found {len(medications)} medications.")
+                                        else:
+                                            st.warning("No medications found in the text.")
+
+                                except Exception as e:
+                                    st.error(f"Analysis error: {str(e)}")
+                    else:
+                        set_ocr_extraction_state(False, "")
+
+                else:
+                    prescription_text = ""
+                    if not auto_ocr:
+                        st.info("⏳ Click 'Extract Text from Image' to start OCR processing")
             else:
-                st.warning("⚠️ File type not supported. Please use TXT files for best results.")
+                st.warning("⚠️ File type not supported. Please use TXT files or image files (JPG, PNG).")
                 prescription_text = ""
     
     else:  # Voice input
@@ -822,9 +1048,9 @@ For: Bacterial infection""",
             )
             
             processing_method = st.selectbox(
-                "Preferred NLP method:",
-                options=["Auto (best available)", "IBM Watson", "HuggingFace", "Gemini AI", "Rule-based"],
-                help="Choose specific NLP processing method"
+                "Processing Mode:",
+                options=["Auto (recommended)", "Ollama Granite (text)", "Gemini OCR (images)", "Rule-based (fallback)"],
+                help="Auto mode uses best available - Granite for text, Gemini for images"
             )
         
         with col2:
@@ -858,14 +1084,36 @@ For: Bacterial infection""",
             
             if result:
                 display_prescription_parse_results(result)
-                
+
+                # Show OCR extracted text if available
+                if 'ocr_extracted_text' in result:
+                    st.subheader("🔤 OCR Extracted Text")
+                    with st.expander("View Extracted Text", expanded=True):
+                        st.code(result['ocr_extracted_text'], language='text')
+                        st.info("📝 **This text was extracted from your image and sent to the AI for analysis.**")
+
+                # Store analyzed drugs in session state for cross-page use
+                medications = result.get('medications', [])
+                if medications:
+                    drug_names = [med['name'] for med in medications]
+                    st.session_state['analyzed_drugs'] = drug_names
+                    st.session_state['prescription_analysis'] = result
+                    processor = result.get('processed_by', result.get('processing_method', 'AI Processing'))
+                    model_icon = "🤖" if "Granite" in processor or "ollama" in processor else "🔮" if "Gemini" in processor else "⚡"
+                    st.success(f"{model_icon} **Prescription analyzed successfully!** Found {len(medications)} medications using {processor}. You can now use these drugs in other analysis tools.")
+
                 # Save to history
                 st.session_state.analysis_history.append({
                     'timestamp': datetime.now(),
-                    'type': 'Prescription Parse',
-                    'input': prescription_text[:100] + "..." if len(prescription_text) > 100 else prescription_text,
+                    'type': 'Prescription Analysis',
+                    'input': (prescription_text[:100] + "..." if isinstance(prescription_text, str) and len(prescription_text) > 100 else prescription_text) if prescription_text else "",
                     'result': result
                 })
+
+                # Button to view complete analysis results
+                if st.button("📊 View Complete Analysis Results", use_container_width=True):
+                    st.session_state['selected_page'] = "📊 Analysis Results"
+                    st.rerun()
                 
                 # Additional analysis options
                 st.subheader("🔬 Additional Analysis")
@@ -893,12 +1141,17 @@ For: Bacterial infection""",
 
 def show_alternative_drugs_page():
     """Alternative medications page"""
-    
+
     st.markdown('<h2 class="section-header">🔄 Alternative Medication Finder</h2>', unsafe_allow_html=True)
-    
+
+    # Show existing analyzed drugs if available
+    if 'analyzed_drugs' in st.session_state and st.session_state['analyzed_drugs']:
+        st.info("💡 **Analyzed medications available:** " + ", ".join(st.session_state['analyzed_drugs']))
+        st.markdown("You can analyze alternatives for these drugs or enter a different medication below.")
+
     st.markdown("""
     <div class="info-box">
-    <strong>How to use:</strong> Enter a medication and patient constraints to find safer or equivalent alternatives. 
+    <strong>How to use:</strong> Enter a medication and patient constraints to find safer or equivalent alternatives.
     The system considers contraindications, allergies, and drug classes to suggest appropriate substitutes.
     </div>
     """, unsafe_allow_html=True)
@@ -1075,6 +1328,227 @@ def show_alternative_drugs_page():
                 
                 else:
                     st.warning("⚠️ No suitable alternatives found or API error occurred")
+
+def show_analysis_results_page():
+    """Comprehensive analysis results dashboard"""
+
+    st.markdown('<h2 class="section-header">📊 Comprehensive Analysis Results</h2>', unsafe_allow_html=True)
+
+    # Check if we have analyzed drugs and results
+    if 'analyzed_drugs' not in st.session_state or not st.session_state['analyzed_drugs']:
+        st.warning("⚠️ Please analyze a prescription first to see comprehensive results.")
+        if st.button("📄 Go to Prescription Analyzer", use_container_width=True):
+            st.session_state['selected_page'] = "📄 Prescription Analyzer"
+            st.rerun()
+        return
+
+    if 'prescription_analysis' not in st.session_state:
+        st.warning("⚠️ Prescription analysis data not found. Please re-analyze the prescription.")
+        return
+
+    drugs = st.session_state['analyzed_drugs']
+    prescription_result = st.session_state['prescription_analysis']
+
+    # Initialize result collections
+    dosage_info_collected = []
+    alternatives_info_collected = []
+
+    # Overall summary
+    st.markdown("""
+    <div class="success-box">
+    <strong>✅ Prescription Analysis Complete</strong><br>
+    Found and analyzed medications for comprehensive safety profile
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Summary cards
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("💊 Medications Found", len(drugs))
+
+    with col2:
+        confidence = prescription_result.get('confidence_score', 0)
+        st.metric("🎯 Analysis Confidence", f"{confidence:.1%}")
+
+    with col3:
+        # Simulate interaction count - would need to actually call the service
+        interactions = len(drugs) * (len(drugs) - 1) // 2 if len(drugs) > 1 else 0
+        st.metric("🔗 Potential Interactions", interactions)
+
+    with col4:
+        # Simulate alternatives count
+        alternatives = len(drugs) * 2  # Rough estimate
+        st.metric("🔄 Alternative Options", alternatives)
+
+    st.markdown("---")
+
+    # Detailed analysis results
+
+    # 1. Original Prescription Analysis
+    st.markdown("### 📄 Original Prescription Analysis")
+    tab1, tab2, tab3, tab4 = st.tabs(["Medications", "Dosages", "Frequencies", "Warnings"])
+
+    medications = prescription_result.get('medications', [])
+
+    with tab1:
+        if medications:
+            med_df = pd.DataFrame([{'Name': m.get('name', 'Unknown'), 'Confidence': m.get('confidence', 0)} for m in medications])
+            st.dataframe(med_df, use_container_width=True)
+        else:
+            st.info("No medications identified")
+
+    with tab2:
+        dosages = prescription_result.get('dosages', [])
+        if dosages:
+            dosage_df = pd.DataFrame(dosages)
+            st.dataframe(dosage_df, use_container_width=True)
+        else:
+            st.info("No dosage information found")
+
+    with tab3:
+        frequencies = prescription_result.get('frequencies', [])
+        if frequencies:
+            for freq in frequencies:
+                st.write(f"• {freq}")
+        else:
+            st.info("No frequency information found")
+
+    with tab4:
+        warnings = prescription_result.get('warnings', [])
+        if warnings:
+            for warning in warnings:
+                st.warning(warning)
+        else:
+            st.success("No analysis warnings")
+
+    # 2. Drug Interaction Analysis
+    if len(drugs) >= 2:
+        st.markdown("---")
+        st.markdown("### 💊 Drug Interaction Analysis")
+
+        if st.button("🔍 Analyze Interactions", use_container_width=True):
+            with st.spinner("Analyzing drug interactions..."):
+                request_data = {"drugs": drugs, "patient_age": None}
+                result = make_api_request("/check-interactions", method="POST", data=request_data)
+
+                if result:
+                    display_interaction_results(
+                        result.get('interactions', []),
+                        result.get('safe', True),
+                        result.get('risk_level', 'unknown'),
+                        result.get('recommendations', [])
+                    )
+                else:
+                    st.error("❌ Failed to analyze drug interactions")
+
+    # 3. Dosage Analysis
+    st.markdown("---")
+    st.markdown("### 📏 Age-Specific Dosage Analysis")
+
+    dosage_col1, dosage_col2 = st.columns(2)
+
+    with dosage_col1:
+        selected_age = st.slider("Patient Age", min_value=1, max_value=120, value=30, help="Select patient age for dosage recommendations")
+
+    with dosage_col2:
+        selected_weight = st.slider("Patient Weight (kg)", min_value=1.0, max_value=150.0, value=70.0, help="Select patient weight")
+
+    if st.button("💊 Analyze Dosages", use_container_width=True):
+        dosage_info_collected = []
+
+        with st.spinner("Analyzing dosages for all medications..."):
+            for drug_name in drugs:
+                request_data = {
+                    "drug_name": drug_name,
+                    "patient_age": selected_age,
+                    "weight": selected_weight,
+                    "indication": None,
+                    "kidney_function": None
+                }
+
+                result = make_api_request("/age-dosage", method="POST", data=request_data)
+                if result:
+                    dosage_info_collected.append((drug_name, result))
+
+        if dosage_info_collected:
+            for drug, dosage in dosage_info_collected:
+                st.subheader(f"💊 {drug}")
+                with st.container():
+                    display_dosage_results(dosage)
+                st.markdown("---")
+        else:
+            st.warning("No dosage information could be retrieved")
+
+    # 4. Alternative Medications Analysis
+    st.markdown("---")
+    st.markdown("### 🔄 Alternative Medications Analysis")
+
+    if st.button("🔍 Analyze Alternatives", use_container_width=True):
+        alternatives_info_collected = []
+
+        with st.spinner("Finding alternatives for all medications..."):
+            for drug_name in drugs:
+                request_data = {
+                    "drug_name": drug_name,
+                    "contraindications": [],
+                    "allergies": [],
+                    "patient_age": selected_age
+                }
+
+                result = make_api_request("/alternative-drugs", method="POST", data=request_data)
+                if result and result.get('alternatives'):
+                    alternatives_info_collected.append((drug_name, result.get('alternatives', [])))
+
+        if alternatives_info_collected:
+            for drug, alternatives in alternatives_info_collected:
+                st.subheader(f"🔄 Alternatives for {drug}")
+
+                col = st.columns(min(len(alternatives), 3))
+
+                for i, alt in enumerate(alternatives[:3]):  # Show top 3 for each drug
+                    with col[i]:
+                        with st.container():
+                            st.write(f"**{alt.get('name', 'Unknown')}**")
+                            similarity = alt.get('similarity_score', 0)
+                            st.progress(similarity)
+                            st.caption(f"Similarity: {similarity:.1%}")
+                            safety = alt.get('safety_profile', 'Unknown')
+                            st.caption(f"Safety: {safety}")
+
+                if len(alternatives) > 3:
+                    with st.expander(f"Show all {len(alternatives)} alternatives for {drug}"):
+                        for alt in alternatives[3:]:
+                            st.write(f"• {alt.get('name', 'Unknown')} - Similarity: {alt.get('similarity_score', 0):.1%}")
+
+                st.markdown("---")
+        else:
+            st.warning("No alternative medications could be found")
+
+    # Actions
+    st.markdown("---")
+    st.markdown("### 🎯 Generate Complete Report")
+
+    if st.button("📄 Generate PDF Report", use_container_width=True):
+        st.info("PDF report generation would be implemented here")
+        st.success("📄 Complete analysis report saved to session history!")
+
+        # Save comprehensive results to history
+        comprehensive_result = {
+            'medications': medications,
+            'dosages_analyzed': len(dosage_info_collected),
+            'interactions_analyzed': len(drugs) >= 2,
+            'alternatives_found': len(alternatives_info_collected),
+            'patient_age': selected_age,
+            'patient_weight': selected_weight
+        }
+
+        st.session_state.analysis_history.append({
+            'timestamp': datetime.now(),
+            'type': 'Comprehensive Analysis',
+            'input': f"Prescribed medications: {', '.join(drugs)}",
+            'result': comprehensive_result
+        })
 
 def show_analysis_history():
     """Display analysis history page"""

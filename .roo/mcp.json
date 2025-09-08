@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "genkit": {
+      "command": "npm",
+      "args": [
+        "install",
+        "@genkit-ai/mcp"
+      ]
+    }
+  }
+}

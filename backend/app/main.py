@@ -1,6 +1,15 @@
 # backend/app/main.py
 import sys
 import os
+import asyncio
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# backend/app/main.py
+import sys
+import os
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -257,7 +266,7 @@ async def get_dosage_guidelines(drug_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # NLP prescription parsing endpoints
-@app.post("/parse-prescription", response_model=PrescriptionParseResponse)
+@app.post("/parse-prescription")
 async def parse_prescription_text(request: PrescriptionText):
     """
     Parse prescription text using NLP to extract structured information
@@ -271,12 +280,83 @@ async def parse_prescription_text(request: PrescriptionText):
             text=request.text,
             language=language
         )
-        
-        return PrescriptionParseResponse(**parsed_data)
-        
+
+        # Validate and sanitize the response before returning
+        try:
+            # Ensure all required fields exist with fallback defaults
+            parsed_data_configs = {
+                'medications': parsed_data.get('medications', []),
+                'dosages': parsed_data.get('dosages', []),
+                'frequencies': parsed_data.get('frequencies', []),
+                'routes': parsed_data.get('routes', []),
+                'confidence_score': parsed_data.get('confidence_score', 0.0),
+                'warnings': parsed_data.get('warnings', [])
+            }
+
+            # Add processing method info if available
+            if 'processing_method' in parsed_data:
+                parsed_data_configs['processing_method'] = parsed_data['processing_method']
+
+            # Validate medication list structure
+            validated_medications = []
+            for med in parsed_data_configs['medications']:
+                if isinstance(med, dict) and 'name' in med:
+                    validated_medications.append({
+                        'name': med['name'],
+                        'confidence': med.get('confidence', 0.0)
+                    })
+            parsed_data_configs['medications'] = validated_medications
+
+            return PrescriptionParseResponse(**parsed_data_configs)
+
+        except Exception as validation_error:
+            logger.error(f"Pydantic validation error: {str(validation_error)}")
+
+            # Return fallback response with safe defaults
+            fallback_result = {
+                'medications': [],
+                'dosages': [],
+                'frequencies': [],
+                'routes': [],
+                'confidence_score': 0.0,
+                'warnings': [f"Response validation failed: {str(validation_error)}"],
+                'processing_method': 'validation_fallback'
+            }
+
+            return PrescriptionParseResponse(**fallback_result)
+
     except Exception as e:
         logger.error(f"Error parsing prescription: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error parsing prescription: {str(e)}")
+
+        # Enhanced error response with debugging info
+        error_result = {
+            'medications': [],
+            'dosages': [],
+            'frequencies': [],
+            'routes': [],
+            'confidence_score': 0.0,
+            'warnings': [
+                f"🚨 Parsing failed due to internal error",
+                f"Error type: {type(e).__name__}",
+                f"Please retry or contact support if the issue persists"
+            ],
+            'processing_method': 'error_fallback'
+        }
+
+        try:
+            return PrescriptionParseResponse(**error_result)
+        except Exception as fallback_error:
+            logger.error(f"Fallback response failed: {str(fallback_error)}")
+            # Last resort - return basic dict
+            return {
+                'medications': [],
+                'dosages': [],
+                'frequencies': [],
+                'routes': [],
+                'confidence_score': 0.0,
+                'warnings': ['Critical system error occurred'],
+                'processing_method': 'critical_error'
+            }
 
 @app.post("/extract-entities")
 async def extract_medical_entities(request: PrescriptionText):
@@ -375,11 +455,137 @@ from fastapi import UploadFile, File
 from fastapi.responses import FileResponse
 import os
 
+@app.post("/extract-text-from-image")
+async def extract_text_from_image(file: UploadFile = File(...), language: Optional[str] = "en"):
+    """
+    Extract text from prescription image using OCR (step 1)
+    Returns extracted text immediately for user review
+    """
+    try:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No file uploaded")
+
+        if not file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+            raise HTTPException(status_code=400, detail="Only image files (JPG, PNG) are supported for OCR extraction")
+
+        # Save uploaded file temporarily
+        temp_dir = "temp_uploads"
+        os.makedirs(temp_dir, exist_ok=True)
+
+        file_path = os.path.join(temp_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+
+        try:
+            logger.info(f"🔍 Starting OCR text extraction from image: {file.filename}")
+
+            # Load image
+            import PIL.Image
+            image = PIL.Image.open(file_path)
+
+            # Use Gemini OCR to extract text only
+            prompt = """
+            Extract all visible text from this prescription image as accurately as possible.
+            Return ONLY the raw text content that you can read. Do not add explanations,
+            summaries, or any additional content. Just return the extracted text exactly as it appears.
+            """
+
+            if nlp_service.ocr_model:
+                loop = asyncio.get_event_loop()
+
+                def _extract_text():
+                    try:
+                        response = nlp_service.ocr_model.generate_content([prompt, image])
+                        return response.text.strip()
+                    except Exception as e:
+                        logger.error(f"OCR extraction failed: {str(e)}")
+                        return "OCR extraction failed. The image may be unclear or unsupported."
+
+                extracted_text = await loop.run_in_executor(None, _extract_text)
+
+                if extracted_text and len(extracted_text) > 10:
+                    logger.info(f"✅ OCR extraction successful, extracted {len(extracted_text)} characters")
+                    ocr_success = True
+                else:
+                    logger.warning("⚠️ OCR extraction produced very little text")
+                    extracted_text = extracted_text or "Minimal text extracted - image may be unclear"
+                    ocr_success = False
+            else:
+                extracted_text = "⚠️ OCR service unavailable. Please check Gemini API configuration."
+                ocr_success = False
+
+            # Clean up temp file
+            os.remove(file_path)
+
+            return {
+                "extracted_text": extracted_text,
+                "ocr_success": ocr_success,
+                "file_processed": file.filename,
+                "language": language or "en",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            # Clean up temp file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+            logger.error(f"OCR extraction error: {str(e)}")
+            return {
+                "extracted_text": f"❌ OCR extraction failed: {str(e)}",
+                "ocr_success": False,
+                "file_processed": file.filename,
+                "language": language or "en",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OCR endpoint error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"OCR processing error: {str(e)}")
+
+@app.post("/analyze-extracted-text")
+async def analyze_extracted_text(request: PrescriptionText):
+    """
+    Analyze previously extracted text with Granite AI (step 2)
+    """
+    try:
+        logger.info(f"🤖 Analyzing extracted text with Granite AI: {len(request.text)} characters")
+
+        # Use the existing prescription parsing with enhanced Granite processing
+        parsed_data = await nlp_service.parse_prescription(
+            text=request.text,
+            language=request.language or "en"
+        )
+
+        # Add metadata to show this came from OCR analysis
+        parsed_data['analyzed_from_ocr'] = True
+        parsed_data['processing_method'] = 'ocr_to_granite_analysis'
+
+        logger.info(f"✅ Granite AI analysis complete - confidence: {parsed_data.get('confidence_score', 0):.2f}")
+
+        return parsed_data
+
+    except Exception as e:
+        logger.error(f"Granite analysis error: {str(e)}")
+        return {
+            'medications': [],
+            'dosages': [],
+            'frequencies': [],
+            'routes': [],
+            'confidence_score': 0.0,
+            'warnings': [f"Granite AI analysis failed: {str(e)}"],
+            'processing_method': 'ocr_fallback_analysis',
+            'analyzed_from_ocr': False
+        }
+
 @app.post("/parse-prescription-file")
 async def parse_prescription_file(file: UploadFile = File(...), language: Optional[str] = "en"):
     """
-    Parse prescription from uploaded file using NLP
-    Supports PDF, DOCX, TXT, JPG, PNG files
+    Legacy endpoint - now redirects to two-step process for images
+    For backward compatibility with existing code
     """
     try:
         if not file.filename:
@@ -395,33 +601,36 @@ async def parse_prescription_file(file: UploadFile = File(...), language: Option
             buffer.write(content)
 
         try:
+            parsed_data = None
+
             # Extract text from file based on type
             if file.filename.lower().endswith(('.txt', '.md')):
+                # Use Ollama Granite for text files
                 text = content.decode('utf-8', errors='ignore')
-            elif file.filename.lower().endswith(('.pdf', 'docx')):
-                # For PDFs and DOCX, we'd need additional libraries like PyPDF2, python-docx
-                # For now, return a helpful message
-                raise HTTPException(
-                    status_code=400,
-                    detail="PDF and DOCX files are not supported in this demo version. Please convert to text or use the text input feature."
-                )
+                logger.info(f"Processing text file with Granite AI model")
+                parsed_data = await nlp_service.parse_prescription(text, language or "en")
+
             elif file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-                # For images, we'd need OCR libraries like pytesseract, easyocr
+                # Use the new two-step OCR process for images
+                logger.info(f"🔍 Processing image file with OCR + Granite workflow")
+                parsed_data = await nlp_service.parse_prescription_from_image(file_path, language or "en")
+
+            elif file.filename.lower().endswith(('.pdf', 'docx')):
                 raise HTTPException(
                     status_code=400,
-                    detail="Image file processing requires additional OCR setup. Please use text input for now."
+                    detail="PDF and DOCX files require additional libraries. For now, please convert to text or use image files for OCR."
                 )
             else:
                 raise HTTPException(
                     status_code=400,
-                    detail="Unsupported file format. Supported: TXT, PDF (in future), DOCX (in future), JPG/PNG (in future)"
+                    detail="Unsupported file format. Supported: TXT (Granite AI), JPG/PNG (Gemini OCR)"
                 )
-
-            # Parse the extracted text
-            parsed_data = await nlp_service.parse_prescription(text, language or "en")
 
             # Clean up temp file
             os.remove(file_path)
+
+            # Add processing metadata
+            parsed_data['processed_by'] = 'Ollama Granite' if file.filename.lower().endswith(('.txt', '.md')) else 'Gemini OCR + Granite Analysis'
 
             return parsed_data
 
@@ -429,7 +638,20 @@ async def parse_prescription_file(file: UploadFile = File(...), language: Option
             # Clean up temp file in case of error
             if os.path.exists(file_path):
                 os.remove(file_path)
-            raise HTTPException(status_code=500, detail=f"File processing error: {str(e)}")
+
+            # Ensure we have a valid response even on error
+            error_result = {
+                'medications': [],
+                'dosages': [],
+                'frequencies': [],
+                'routes': [],
+                'confidence_score': 0.0,
+                'warnings': [f"File processing failed: {str(e)}"],
+                'processing_method': 'error_fallback',
+                'processed_by': 'Processing Failed'
+            }
+
+            return error_result
 
     except HTTPException:
         raise

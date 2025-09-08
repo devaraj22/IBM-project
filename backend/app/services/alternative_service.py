@@ -87,10 +87,95 @@ class AlternativeDrugService:
             {
                 "original_drug": "warfarin", "alternative_drug": "rivaroxaban",
                 "drug_class": "Anticoagulant", "mechanism": "Factor Xa inhibition",
-                "similarity_score": 0.80, "safety_profile": "Medium", 
+                "similarity_score": 0.80, "safety_profile": "Medium",
                 "advantages": "No monitoring required, fewer interactions",
                 "considerations": "Higher cost, limited reversal options",
                 "contraindications": "Severe renal impairment"
+            },
+            # Augmentin alternatives
+            {
+                "original_drug": "augmentin", "alternative_drug": "azithromycin",
+                "drug_class": "Macrolide antibiotic", "mechanism": "Protein synthesis inhibition",
+                "similarity_score": 0.70, "safety_profile": "High",
+                "advantages": "Once daily dosing, fewer interactions",
+                "considerations": "Different spectrum of coverage",
+                "contraindications": "QT prolongation, myasthenia gravis"
+            },
+            {
+                "original_drug": "augmentin", "alternative_drug": "ciprofloxacin",
+                "drug_class": "Fluoroquinolone antibiotic", "mechanism": "DNA gyrase inhibition",
+                "similarity_score": 0.75, "safety_profile": "Medium",
+                "advantages": "Broad spectrum coverage",
+                "considerations": "Tendon issues, QT prolongation",
+                "contraindications": "Pregnancy, children under 18"
+            },
+            # Amoxicillin alternatives
+            {
+                "original_drug": "amoxicillin", "alternative_drug": "cefuroxime",
+                "drug_class": "Cephalosporin antibiotic", "mechanism": "Cell wall synthesis inhibition",
+                "similarity_score": 0.85, "safety_profile": "High",
+                "advantages": "Good skin and soft tissue coverage",
+                "considerations": "Different allergy cross-reactivity",
+                "contraindications": "Severe penicillin allergy"
+            },
+            {
+                "original_drug": "amoxicillin", "alternative_drug": "doxycycline",
+                "drug_class": "Tetracycline antibiotic", "mechanism": "Protein synthesis inhibition",
+                "similarity_score": 0.70, "safety_profile": "Medium",
+                "advantages": "Good intracellular activity",
+                "considerations": "Photosensitivity, dental staining in children",
+                "contraindications": "Pregnancy, children under 8"
+            },
+            # Metformin alternatives
+            {
+                "original_drug": "metformin", "alternative_drug": "glipizide",
+                "drug_class": "Sulfonylurea", "mechanism": "Pancreatic insulin secretion",
+                "similarity_score": 0.65, "safety_profile": "Medium",
+                "advantages": "Rapid glycemic control",
+                "considerations": "Weight gain, hypoglycemia risk",
+                "contraindications": "Severe renal impairment, pancreatic disease"
+            },
+            {
+                "original_drug": "metformin", "alternative_drug": "sitagliptin",
+                "drug_class": "DPP-4 inhibitor", "mechanism": "Incretin enhancement",
+                "similarity_score": 0.70, "safety_profile": "High",
+                "advantages": "Weight neutral, low hypoglycemia risk",
+                "considerations": "Higher cost",
+                "contraindications": "Severe renal impairment"
+            },
+            # Ibuprofen alternatives
+            {
+                "original_drug": "ibuprofen", "alternative_drug": "diclofenac",
+                "drug_class": "NSAID", "mechanism": "COX inhibition",
+                "similarity_score": 0.90, "safety_profile": "Medium",
+                "advantages": "High potency and anti-inflammatory effect",
+                "considerations": "More GI and CV adverse effects",
+                "contraindications": "Severe heart disease, uncontrolled HTN"
+            },
+            {
+                "original_drug": "ibuprofen", "alternative_drug": "naproxen",
+                "drug_class": "NSAID", "mechanism": "COX inhibition",
+                "similarity_score": 0.88, "safety_profile": "Medium",
+                "advantages": "Longer duration of action",
+                "considerations": "Similar GI and CV adverse effects",
+                "contraindications": "Severe heart disease, uncontrolled HTN"
+            },
+            # Omeprazole alternatives
+            {
+                "original_drug": "omeprazole", "alternative_drug": "pantoprazole",
+                "drug_class": "Proton pump inhibitor", "mechanism": "H+,K+-ATPase inhibition",
+                "similarity_score": 0.95, "safety_profile": "High",
+                "advantages": "Fewer drug interactions, IV formulation available",
+                "considerations": "No major differences in efficacy",
+                "contraindications": "Similar to other PPIs"
+            },
+            {
+                "original_drug": "omeprazole", "alternative_drug": "ranitidine",
+                "drug_class": "H2 blocker", "mechanism": "H2 receptor blockade",
+                "similarity_score": 0.70, "safety_profile": "High",
+                "advantages": "No cytochrome P450 interactions, faster onset",
+                "considerations": "Less potent than PPIs, multiple daily doses",
+                "contraindications": "Rare allergic reactions"
             }
         ]
         
@@ -114,7 +199,25 @@ class AlternativeDrugService:
             {"drug_name": "lisinopril", "therapeutic_class": "ACE inhibitor", "mechanism_class": "RAAS blocker"},
             {"drug_name": "losartan", "therapeutic_class": "ARB", "mechanism_class": "RAAS blocker"},
             {"drug_name": "warfarin", "therapeutic_class": "Anticoagulant", "mechanism_class": "Vitamin K antagonist"},
-            {"drug_name": "rivaroxaban", "therapeutic_class": "Anticoagulant", "mechanism_class": "Factor Xa inhibitor"}
+            {"drug_name": "rivaroxaban", "therapeutic_class": "Anticoagulant", "mechanism_class": "Factor Xa inhibitor"},
+            {"drug_name": "amoxicillin", "therapeutic_class": "Penicillin antibiotic", "mechanism_class": "Cell wall synthesis inhibitor"},
+            {"drug_name": "augmentin", "therapeutic_class": "Penicillin antibiotic", "mechanism_class": "Cell wall synthesis inhibitor"},
+            {"drug_name": "azithromycin", "therapeutic_class": "Macrolide antibiotic", "mechanism_class": "Protein synthesis inhibitor"},
+            {"drug_name": "ciprofloxacin", "therapeutic_class": "Fluoroquinolone antibiotic", "mechanism_class": "DNA gyrase inhibitor"},
+            {"drug_name": "cefuroxime", "therapeutic_class": "Cephalosporin antibiotic", "mechanism_class": "Cell wall synthesis inhibitor"},
+            {"drug_name": "doxycycline", "therapeutic_class": "Tetracycline antibiotic", "mechanism_class": "Protein synthesis inhibitor"},
+            {"drug_name": "metformin", "therapeutic_class": "Biguanide", "mechanism_class": "AMPK activator"},
+            {"drug_name": "glipizide", "therapeutic_class": "Sulfonylurea", "mechanism_class": "Pancreatic insulin secretagogue"},
+            {"drug_name": "sitagliptin", "therapeutic_class": "DPP-4 inhibitor", "mechanism_class": "Incretin enhancer"},
+            {"drug_name": "diclofenac", "therapeutic_class": "NSAID", "mechanism_class": "COX inhibitor"},
+            {"drug_name": "naproxen", "therapeutic_class": "NSAID", "mechanism_class": "COX inhibitor"},
+            {"drug_name": "omeprazole", "therapeutic_class": "PPI", "mechanism_class": "H+,K+-ATPase inhibitor"},
+            {"drug_name": "pantoprazole", "therapeutic_class": "PPI", "mechanism_class": "H+,K+-ATPase inhibitor"},
+            {"drug_name": "ranitidine", "therapeutic_class": "H2 blocker", "mechanism_class": "H2 receptor antagonist"},
+            {"drug_name": "prednisone", "therapeutic_class": "Corticosteroid", "mechanism_class": "Glucocorticoid receptor agonist"},
+            {"drug_name": "furosemide", "therapeutic_class": "Loop diuretic", "mechanism_class": "Na+/K+/2Cl- cotransporter inhibitor"},
+            {"drug_name": "enzoflam", "therapeutic_class": "NSAID", "mechanism_class": "COX inhibitor"},
+            {"drug_name": "pan-d", "therapeutic_class": "Multivitamin", "mechanism_class": "Nutritional supplement"}
         ]
         
         for drug_class in drug_classes:
@@ -179,19 +282,23 @@ class AlternativeDrugService:
                     alt_dict = dict(zip(columns, result))
                     
                     # Format the alternative data
-                    alternative = {
-                        "name": alt_dict["alternative_drug"].title(),
-                        "drug_class": alt_dict["drug_class"],
-                        "mechanism": alt_dict["mechanism"],
-                        "similarity_score": alt_dict["similarity_score"],
-                        "safety_profile": alt_dict["safety_profile"],
-                        "advantages": alt_dict["advantages"].split("|") if alt_dict["advantages"] else [],
-                        "considerations": alt_dict["considerations"].split("|") if alt_dict["considerations"] else [],
-                        "contraindications": alt_dict["contraindications"].split("|") if alt_dict["contraindications"] else [],
-                        "source": "database"
-                    }
-                    
-                    alternatives.append(alternative)
+                    try:
+                        alternative = {
+                            "name": alt_dict["alternative_drug"].title(),
+                            "drug_class": alt_dict["drug_class"],
+                            "mechanism": alt_dict["mechanism"],
+                            "similarity_score": alt_dict["similarity_score"],
+                            "safety_profile": alt_dict["safety_profile"],
+                            "advantages": alt_dict["advantages"].split("|") if alt_dict["advantages"] else [],
+                            "considerations": alt_dict["considerations"].split("|") if alt_dict["considerations"] else [],
+                            "contraindications": alt_dict["contraindications"].split("|") if alt_dict["contraindications"] else [],
+                            "source": "database"
+                        }
+
+                        alternatives.append(alternative)
+                    except Exception as e:
+                        logger.error(f"Error processing alternative {alt_dict}: {str(e)}")
+                        continue
                     
         except Exception as e:
             logger.error(f"Error getting database alternatives: {str(e)}")

@@ -113,6 +113,67 @@ class DosageService:
                 "drug_name": "amoxicillin", "age_group": "adult", "min_age": 18, "max_age": 65,
                 "base_dose": 250.0, "max_dose": 500.0, "unit": "mg", "frequency": "three times daily",
                 "route": "oral", "weight_based": False
+            },
+            # Augmentin (Amoxicillin + Clavulanate)
+            {
+                "drug_name": "augmentin", "age_group": "infant", "min_age": 0, "max_age": 2,
+                "base_dose": 25.0, "max_dose": 45.0, "unit": "mg/kg/day", "frequency": "divided twice daily",
+                "route": "oral", "weight_based": True
+            },
+            {
+                "drug_name": "augmentin", "age_group": "child", "min_age": 2, "max_age": 12,
+                "base_dose": 25.0, "max_dose": 40.0, "unit": "mg/kg/day", "frequency": "divided twice daily",
+                "route": "oral", "weight_based": True
+            },
+            {
+                "drug_name": "augmentin", "age_group": "adult", "min_age": 18, "max_age": 65,
+                "base_dose": 250.0, "max_dose": 1000.0, "unit": "mg", "frequency": "three times daily",
+                "route": "oral", "weight_based": False
+            },
+            # Metformin
+            {
+                "drug_name": "metformin", "age_group": "child", "min_age": 10, "max_age": 16,
+                "base_dose": 250.0, "max_dose": 500.0, "unit": "mg", "frequency": "twice daily",
+                "route": "oral", "weight_based": False
+            },
+            {
+                "drug_name": "metformin", "age_group": "adult", "min_age": 18, "max_age": 65,
+                "base_dose": 500.0, "max_dose": 2000.0, "unit": "mg", "frequency": "twice daily",
+                "route": "oral", "weight_based": False
+            },
+            # Omeprazole
+            {
+                "drug_name": "omeprazole", "age_group": "adult", "min_age": 18, "max_age": 65,
+                "base_dose": 20.0, "max_dose": 40.0, "unit": "mg", "frequency": "once daily",
+                "route": "oral", "weight_based": False
+            },
+            {
+                "drug_name": "omeprazole", "age_group": "elderly", "min_age": 65, "max_age": 120,
+                "base_dose": 20.0, "max_dose": 20.0, "unit": "mg", "frequency": "once daily",
+                "route": "oral", "weight_based": False
+            },
+            # Prednisone
+            {
+                "drug_name": "prednisone", "age_group": "child", "min_age": 1, "max_age": 12,
+                "base_dose": 0.5, "max_dose": 2.0, "unit": "mg/kg/day", "frequency": "once daily",
+                "route": "oral", "weight_based": True
+            },
+            {
+                "drug_name": "prednisone", "age_group": "adult", "min_age": 18, "max_age": 65,
+                "base_dose": 5.0, "max_dose": 60.0, "unit": "mg", "frequency": "once daily",
+                "route": "oral", "weight_based": False
+            },
+            # Warfarin
+            {
+                "drug_name": "warfarin", "age_group": "adult", "min_age": 18, "max_age": 120,
+                "base_dose": 2.0, "max_dose": 10.0, "unit": "mg", "frequency": "variable - titrate to INR",
+                "route": "oral", "weight_based": False
+            },
+            # Furosemide
+            {
+                "drug_name": "furosemide", "age_group": "adult", "min_age": 18, "max_age": 65,
+                "base_dose": 20.0, "max_dose": 80.0, "unit": "mg", "frequency": "once daily",
+                "route": "oral", "weight_based": False
             }
         ]
         
