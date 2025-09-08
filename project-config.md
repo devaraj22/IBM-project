@@ -12,15 +12,11 @@ aiohttp==3.9.1
 pandas==1.5.3
 numpy==1.24.3
 
-
-
-# HuggingFace & PyTorch
-transformers==4.35.2
-torch==2.1.1
-tokenizers==0.15.0
-
 # Google Gemini
 google-generativeai==0.3.1
+
+# Ollama
+ollama==0.1.7
 
 # Async support
 asyncio
@@ -328,9 +324,10 @@ def setup_environment():
     print("\n🎉 Setup completed successfully!")
     print("\n📝 Next steps:")
     print("1. Update .env file with your API keys (IBM Watson, Gemini)")
-    print("2. Start the backend: cd backend && uvicorn app.main:app --reload")
-    print("3. Start the frontend: cd frontend && streamlit run streamlit_app.py")
-    print("4. Open http://localhost:8501 in your browser")
+    print("2. Install Ollama and pull the granite3.2-vision model: ollama pull granite3.2-vision")
+    print("3. Start the backend: cd backend && uvicorn app.main:app --reload")
+    print("4. Start the frontend: cd frontend && streamlit run streamlit_app.py")
+    print("5. Open http://localhost:8501 in your browser")
     
     return True
 
@@ -452,7 +449,7 @@ A comprehensive AI-powered system for medical prescription verification, drug in
 
 - **Drug Interaction Detection**: Check for dangerous drug-drug interactions using multiple medical databases
 - **Age-Specific Dosage**: Calculate appropriate dosages based on patient age, weight, and medical conditions  
-- **NLP Prescription Parser**: Extract structured information from prescription text using IBM Watson, HuggingFace, and Gemini AI
+- **NLP Prescription Parser**: Extract structured information from prescription text using Ollama (granite3.2-vision model) and Google Gemini AI
 - **Alternative Medication Finder**: Suggest safer alternatives when contraindications exist
 - **Interactive Dashboard**: User-friendly Streamlit interface for healthcare professionals
 
@@ -461,8 +458,7 @@ A comprehensive AI-powered system for medical prescription verification, drug in
 ### Backend (FastAPI)
 - **FastAPI**: High-performance API framework
 - **SQLite/PostgreSQL**: Database for caching and storage
-- **IBM Watson NLU**: Primary NLP processing
-- **HuggingFace Transformers**: Medical NER models
+- **Ollama**: Primary NLP processing (using granite3.2-vision model)
 - **Google Gemini AI**: Fallback AI processing
 - **RxNorm API**: Drug terminology and interactions
 - **OpenFDA**: Adverse event data
@@ -476,9 +472,9 @@ A comprehensive AI-powered system for medical prescription verification, drug in
 ## 📋 Prerequisites
 
 - Python 3.8+
-- IBM Watson API key
 - Google Gemini API key (optional)
 - Docker (for containerized deployment)
+- Ollama with granite3.2-vision model
 
 ## 🔧 Installation
 
@@ -514,6 +510,13 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 # Edit .env with your API keys
+```
+
+4. **Ollama Setup**
+```bash
+# Install Ollama from https://ollama.com/
+# Pull the granite3.2-vision model
+ollama pull granite3.2-vision
 ```
 
 ## 🚀 Running the Application
@@ -611,8 +614,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- IBM Watson for NLP services
-- HuggingFace for medical NER models
+- Ollama for local AI processing with granite3.2-vision model
 - Google for Gemini AI
 - OpenFDA for adverse event data
 - RxNorm for drug terminology

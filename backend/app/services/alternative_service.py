@@ -132,27 +132,30 @@ class AlternativeDrugService:
         """Cleanup resources"""
         pass
     
-    async def find_alternatives(self, original_drug: str, contraindications: List[str] = None,
-                              allergies: List[str] = None, patient_age: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def find_alternatives(self, original_drug: str, contraindications: Optional[List[str]] = None,
+                               allergies: Optional[List[str]] = None, patient_age: Optional[int] = None) -> List[Dict[str, Any]]:
         """Find alternative medications based on patient constraints"""
-        
+
         try:
             alternatives = []
-            
+
             # Get alternatives from database
             db_alternatives = self._get_database_alternatives(original_drug)
             alternatives.extend(db_alternatives)
-            
+
             # Filter alternatives based on contraindications and allergies
             filtered_alternatives = self._filter_alternatives(
                 alternatives, contraindications, allergies, patient_age
             )
-            
+
+            # Remove duplicates by medication name
+            filtered_alternatives = self._deduplicate_alternatives(filtered_alternatives)
+
             # Rank alternatives by suitability
             ranked_alternatives = self._rank_alternatives(filtered_alternatives, patient_age)
-            
+
             return ranked_alternatives[:5]  # Return top 5 alternatives
-            
+
         except Exception as e:
             logger.error(f"Error finding alternatives: {str(e)}")
             return []
@@ -195,8 +198,8 @@ class AlternativeDrugService:
         
         return alternatives
     
-    def _filter_alternatives(self, alternatives: List[Dict], contraindications: List[str] = None,
-                           allergies: List[str] = None, patient_age: Optional[int] = None) -> List[Dict]:
+    def _filter_alternatives(self, alternatives: List[Dict], contraindications: Optional[List[str]] = None,
+                           allergies: Optional[List[str]] = None, patient_age: Optional[int] = None) -> List[Dict]:
         """Filter alternatives based on patient constraints"""
         
         if not contraindications:
@@ -271,7 +274,20 @@ class AlternativeDrugService:
         
         # Sort by suitability score
         return sorted(alternatives, key=lambda x: x.get("suitability_score", 0), reverse=True)
-    
+
+    def _deduplicate_alternatives(self, alternatives: List[Dict]) -> List[Dict]:
+        """Remove duplicate alternatives based on medication name"""
+        seen_names = set()
+        deduplicated = []
+
+        for alt in alternatives:
+            name = alt.get("name", "").lower().strip()
+            if name and name not in seen_names:
+                seen_names.add(name)
+                deduplicated.append(alt)
+
+        return deduplicated
+
     async def get_drug_classes(self, drug_name: str) -> List[Dict]:
         """Get therapeutic classes for a drug"""
         classes = []

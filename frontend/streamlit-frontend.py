@@ -64,24 +64,55 @@ st.markdown("""
     }
     .metric-card {
         background: white;
+        color: #333333;
         padding: 1rem;
         border-radius: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         text-align: center;
         margin: 0.5rem;
     }
+
+    /* Ensure all box types have visible text */
+    .warning-box {
+        color: #856404;
+    }
+    .danger-box {
+        color: #721c24;
+    }
+    .success-box {
+        color: #155724;
+    }
+    .info-box {
+        color: #0c5460;
+    }
+
+    /* Metric card specific styling */
+    .metric-card h3 {
+        color: #2c3e50;
+        margin-bottom: 0.5rem;
+    }
+    .metric-card h2 {
+        color: #3498db;
+        font-size: 2rem;
+        margin: 0.5rem 0;
+    }
+    .metric-card p {
+        color: #7f8c8d;
+        font-size: 0.9rem;
+        margin: 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # Configuration
-API_BASE_URL = "http://localhost:8000/api"
+API_BASE_URL = "http://localhost:8000"
 
 # Session state initialization
 if 'analysis_history' not in st.session_state:
     st.session_state.analysis_history = []
 
 # Helper functions
-def make_api_request(endpoint: str, method: str = "GET", data: Dict = None) -> Dict:
+def make_api_request(endpoint: str, method: str = "GET", data: Optional[Dict] = None) -> Dict:
     """Make API request with error handling"""
     try:
         url = f"{API_BASE_URL}{endpoint}"
@@ -281,17 +312,40 @@ def main():
     
     # Sidebar navigation
     st.sidebar.title("📋 Navigation")
-    selected_page = st.sidebar.radio(
-        "Choose a function:",
-        [
-            "🏠 Dashboard", 
+
+    # Check for quick navigation from session state
+    if 'selected_page' in st.session_state:
+        default_index = [
+            "🏠 Dashboard",
             "💊 Drug Interaction Checker",
             "📏 Age-Specific Dosage",
             "📄 Prescription Parser",
             "🔄 Alternative Medications",
             "📊 Analysis History"
-        ]
+        ].index(st.session_state['selected_page'])
+        # Clear the selected page after using it
+        selected_page_value = st.session_state['selected_page']
+        del st.session_state['selected_page']
+    else:
+        default_index = 0
+        selected_page_value = None
+
+    selected_page = st.sidebar.radio(
+        "Choose a function:",
+        [
+            "🏠 Dashboard",
+            "💊 Drug Interaction Checker",
+            "📏 Age-Specific Dosage",
+            "📄 Prescription Parser",
+            "🔄 Alternative Medications",
+            "📊 Analysis History"
+        ],
+        index=default_index
     )
+
+    # Use the quick navigation selection if available
+    if selected_page_value and selected_page != selected_page_value:
+        selected_page = selected_page_value
     
     # System status check
     with st.sidebar:
@@ -405,20 +459,26 @@ def show_dashboard():
     
     # Quick actions
     st.subheader("🚀 Quick Actions")
-    
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         if st.button("🔍 Check Drug Interactions", use_container_width=True):
-            st.experimental_set_query_params(page="interactions")
-    
+            st.success("🔍 Navigating to Drug Interaction Checker...")
+            st.session_state['selected_page'] = "💊 Drug Interaction Checker"
+            st.rerun()
+
     with col2:
         if st.button("💊 Calculate Dosage", use_container_width=True):
-            st.experimental_set_query_params(page="dosage")
-    
+            st.success("💊 Navigating to Age-Specific Dosage...")
+            st.session_state['selected_page'] = "📏 Age-Specific Dosage"
+            st.rerun()
+
     with col3:
         if st.button("📄 Parse Prescription", use_container_width=True):
-            st.experimental_set_query_params(page="parser")
+            st.success("📄 Navigating to Prescription Parser...")
+            st.session_state['selected_page'] = "📄 Prescription Parser"
+            st.rerun()
 
 def show_drug_interaction_page():
     """Drug interaction checker page"""
@@ -718,18 +778,31 @@ For: Bacterial infection""",
         uploaded_file = st.file_uploader(
             "Upload prescription file:",
             type=['txt', 'pdf', 'docx', 'jpg', 'png'],
-            help="Support for text files and images"
+            help="Support for text files mainly. PDF/DOCX/Image processing may require additional backend setup."
         )
-        
+
         if uploaded_file:
+            # Display file info
+            st.info(f"📄 Uploaded: {uploaded_file.name} ({uploaded_file.size} bytes)")
+
             if uploaded_file.type == "text/plain":
                 prescription_text = uploaded_file.read().decode('utf-8')
                 st.text_area("Extracted text:", value=prescription_text, height=150)
             elif uploaded_file.type.startswith('image/'):
                 st.image(uploaded_file, caption="Uploaded prescription image")
-                st.warning("⚠️ OCR functionality not implemented in this demo")
+                st.warning("ℹ️ Image file uploaded. Text will be extracted on backend (may require OCR setup).")
+                prescription_text = "Image uploaded - will process on backend"
+            elif uploaded_file.type in ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
+                st.info("📑 File uploaded. Individual text extraction needed:")
+                prescription_text = st.text_area(
+                    "Please paste the text content of your PDF/DOCX file:",
+                    height=200,
+                    placeholder="Copy and paste the text from your file here..."
+                )
+                st.warning("⚠️ PDF and DOCX files require manual text extraction for now")
             else:
-                st.warning("⚠️ File type not supported in this demo")
+                st.warning("⚠️ File type not supported. Please use TXT files for best results.")
+                prescription_text = ""
     
     else:  # Voice input
         st.warning("🎤 Voice input feature is experimental and not implemented in this demo")

@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 # Pydantic models for request/response
 class DrugInteractionRequest(BaseModel):
-    drugs: List[str] = Field(..., min_items=2, description="List of drug names to check for interactions")
+    drugs: List[str] = Field(..., description="List of drug names to check for interactions")
     patient_age: Optional[int] = Field(None, ge=0, le=120, description="Patient age for context")
     severity_filter: Optional[str] = Field(None, description="Filter by severity: minor, moderate, major")
 
@@ -108,20 +108,53 @@ alternative_service = AlternativeDrugService()
 @app.get("/health")
 async def health_check():
     """Health check endpoint to verify API status"""
+
+    # Test database connections
+    services_status = {}
+    try:
+        # Test drug service
+        await drug_service.initialize()
+        services_status["drug_interaction"] = "operational"
+    except Exception as e:
+        services_status["drug_interaction"] = "error"
+        logger.error(f"Drug service error: {str(e)}")
+
+    try:
+        # Test NLP service
+        await nlp_service.initialize()
+        services_status["nlp_processing"] = "operational"
+    except Exception as e:
+        services_status["nlp_processing"] = "error"
+        logger.error(f"NLP service error: {str(e)}")
+
+    try:
+        # Test dosage service
+        await dosage_service.initialize()
+        services_status["dosage_calculation"] = "operational"
+    except Exception as e:
+        services_status["dosage_calculation"] = "error"
+        logger.error(f"Dosage service error: {str(e)}")
+
+    try:
+        # Test alternative service
+        await alternative_service.initialize()
+        services_status["alternative_drugs"] = "operational"
+    except Exception as e:
+        services_status["alternative_drugs"] = "error"
+        logger.error(f"Alternative service error: {str(e)}")
+
+    # Overall status
+    overall_status = "healthy" if all(status == "operational" for status in services_status.values()) else "degraded"
+
     return {
-        "status": "healthy",
+        "status": overall_status,
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0",
-        "services": {
-            "drug_interaction": "operational",
-            "nlp_processing": "operational",
-            "dosage_calculation": "operational",
-            "alternative_drugs": "operational"
-        }
+        "services": services_status
     }
 
 # Drug interaction endpoints
-@app.post("/api/check-interactions", response_model=DrugInteractionResponse)
+@app.post("/check-interactions", response_model=DrugInteractionResponse)
 async def check_drug_interactions(request: DrugInteractionRequest):
     """
     Check for drug-drug interactions between multiple medications
@@ -164,7 +197,7 @@ async def check_drug_interactions(request: DrugInteractionRequest):
         logger.error(f"Error checking drug interactions: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error checking drug interactions: {str(e)}")
 
-@app.get("/api/interaction-details/{drug1}/{drug2}")
+@app.get("/interaction-details/{drug1}/{drug2}")
 async def get_interaction_details(drug1: str, drug2: str):
     """
     Get detailed information about interaction between two specific drugs
@@ -179,7 +212,7 @@ async def get_interaction_details(drug1: str, drug2: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Age-specific dosage endpoints
-@app.post("/api/age-dosage", response_model=DosageResponse)
+@app.post("/age-dosage", response_model=DosageResponse)
 async def get_age_specific_dosage(request: DosageRequest):
     """
     Get age-specific dosage recommendations for a medication
@@ -209,7 +242,7 @@ async def get_age_specific_dosage(request: DosageRequest):
         logger.error(f"Error calculating dosage: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error calculating dosage: {str(e)}")
 
-@app.get("/api/dosage-guidelines/{drug_name}")
+@app.get("/dosage-guidelines/{drug_name}")
 async def get_dosage_guidelines(drug_name: str):
     """
     Get general dosage guidelines for a specific drug
@@ -224,7 +257,7 @@ async def get_dosage_guidelines(drug_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # NLP prescription parsing endpoints
-@app.post("/api/parse-prescription", response_model=PrescriptionParseResponse)
+@app.post("/parse-prescription", response_model=PrescriptionParseResponse)
 async def parse_prescription_text(request: PrescriptionText):
     """
     Parse prescription text using NLP to extract structured information
@@ -233,9 +266,10 @@ async def parse_prescription_text(request: PrescriptionText):
         logger.info(f"Parsing prescription text of length: {len(request.text)}")
         
         # Process with NLP service
+        language = request.language if request.language else "en"
         parsed_data = await nlp_service.parse_prescription(
             text=request.text,
-            language=request.language
+            language=language
         )
         
         return PrescriptionParseResponse(**parsed_data)
@@ -244,7 +278,7 @@ async def parse_prescription_text(request: PrescriptionText):
         logger.error(f"Error parsing prescription: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error parsing prescription: {str(e)}")
 
-@app.post("/api/extract-entities")
+@app.post("/extract-entities")
 async def extract_medical_entities(request: PrescriptionText):
     """
     Extract medical entities from prescription text
@@ -257,7 +291,7 @@ async def extract_medical_entities(request: PrescriptionText):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Alternative medication endpoints
-@app.post("/api/alternative-drugs")
+@app.post("/alternative-drugs")
 async def get_alternative_medications(request: AlternativeRequest):
     """
     Get alternative medication suggestions based on contraindications and patient profile
@@ -278,7 +312,7 @@ async def get_alternative_medications(request: AlternativeRequest):
         logger.error(f"Error finding alternatives: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error finding alternatives: {str(e)}")
 
-@app.get("/api/drug-classes/{drug_name}")
+@app.get("/drug-classes/{drug_name}")
 async def get_drug_classes(drug_name: str):
     """
     Get therapeutic classes for a specific drug
@@ -291,7 +325,7 @@ async def get_drug_classes(drug_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Search and utility endpoints
-@app.get("/api/search-drugs")
+@app.get("/search-drugs")
 async def search_drugs(query: str, limit: int = 10):
     """
     Search for drugs by name or partial match
@@ -303,7 +337,7 @@ async def search_drugs(query: str, limit: int = 10):
         logger.error(f"Error searching drugs: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/drug-info/{drug_name}")
+@app.get("/drug-info/{drug_name}")
 async def get_drug_information(drug_name: str):
     """
     Get comprehensive drug information
@@ -318,7 +352,7 @@ async def get_drug_information(drug_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Analytics and monitoring endpoints
-@app.get("/api/analytics/usage")
+@app.get("/analytics/usage")
 async def get_usage_analytics():
     """
     Get API usage analytics (for monitoring)
@@ -335,6 +369,73 @@ async def get_usage_analytics():
     except Exception as e:
         logger.error(f"Error getting analytics: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# File upload endpoints
+from fastapi import UploadFile, File
+from fastapi.responses import FileResponse
+import os
+
+@app.post("/parse-prescription-file")
+async def parse_prescription_file(file: UploadFile = File(...), language: Optional[str] = "en"):
+    """
+    Parse prescription from uploaded file using NLP
+    Supports PDF, DOCX, TXT, JPG, PNG files
+    """
+    try:
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No file uploaded")
+
+        # Save uploaded file temporarily
+        temp_dir = "temp_uploads"
+        os.makedirs(temp_dir, exist_ok=True)
+
+        file_path = os.path.join(temp_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+
+        try:
+            # Extract text from file based on type
+            if file.filename.lower().endswith(('.txt', '.md')):
+                text = content.decode('utf-8', errors='ignore')
+            elif file.filename.lower().endswith(('.pdf', 'docx')):
+                # For PDFs and DOCX, we'd need additional libraries like PyPDF2, python-docx
+                # For now, return a helpful message
+                raise HTTPException(
+                    status_code=400,
+                    detail="PDF and DOCX files are not supported in this demo version. Please convert to text or use the text input feature."
+                )
+            elif file.filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                # For images, we'd need OCR libraries like pytesseract, easyocr
+                raise HTTPException(
+                    status_code=400,
+                    detail="Image file processing requires additional OCR setup. Please use text input for now."
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Unsupported file format. Supported: TXT, PDF (in future), DOCX (in future), JPG/PNG (in future)"
+                )
+
+            # Parse the extracted text
+            parsed_data = await nlp_service.parse_prescription(text, language or "en")
+
+            # Clean up temp file
+            os.remove(file_path)
+
+            return parsed_data
+
+        except Exception as e:
+            # Clean up temp file in case of error
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(status_code=500, detail=f"File processing error: {str(e)}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing file upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"File upload error: {str(e)}")
 
 # Error handlers
 @app.exception_handler(ValueError)

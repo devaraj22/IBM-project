@@ -6,7 +6,7 @@ A comprehensive AI-powered system for medical prescription verification, drug in
 
 - **Drug Interaction Detection**: Check for dangerous drug-drug interactions using multiple medical databases
 - **Age-Specific Dosage**: Calculate appropriate dosages based on patient age, weight, and medical conditions  
-- **NLP Prescription Parser**: Extract structured information from prescription text using Ollama and Google Gemini AI
+- **NLP Prescription Parser**: Extract structured information from prescription text using Ollama (granite3.2-vision model) and Google Gemini AI
 - **Alternative Medication Finder**: Suggest safer alternatives when contraindications exist
 - **Interactive Dashboard**: User-friendly Streamlit interface for healthcare professionals
 
@@ -15,7 +15,7 @@ A comprehensive AI-powered system for medical prescription verification, drug in
 ### Backend (FastAPI)
 - **FastAPI**: High-performance API framework
 - **SQLite/PostgreSQL**: Database for caching and storage
-- **Ollama**: Primary NLP processing
+- **Ollama**: Primary NLP processing (using granite3.2-vision model)
 - **Google Gemini AI**: Fallback AI processing
 - **RxNorm API**: Drug terminology and interactions
 - **OpenFDA**: Adverse event data
@@ -30,7 +30,7 @@ A comprehensive AI-powered system for medical prescription verification, drug in
 
 - Python 3.8+
 - Docker (for containerized deployment)
-- Ollama (for local AI processing)
+- Ollama (for local AI processing) with granite3.2-vision model
 
 ## 🔧 Installation
 
@@ -69,6 +69,13 @@ pip install -r requirements.txt
 ```bash
 cp .env.example .env
 # Edit .env with your API keys
+```
+
+4. **Ollama Setup**
+```bash
+# Install Ollama from https://ollama.com/
+# Pull the granite3.2-vision model
+ollama pull granite3.2-vision
 ```
 
 ## 🚀 Running the Application
@@ -148,6 +155,9 @@ pytest tests/
 
 ### Integration Tests
 ```bash
+# Test Ollama model name
+python test_ollama_model.py
+
 # Test NLP service without Hugging Face
 python test_nlp_service.py
 
@@ -180,7 +190,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- Ollama for local AI processing
+- Ollama for local AI processing with granite3.2-vision model
 - Google for Gemini AI
 - OpenFDA for adverse event data
 - RxNorm for drug terminology
@@ -194,29 +204,4 @@ For support and questions:
 
 ---
 
-**Disclaimer**: This system is intended for educational and research purposes only. It should not be used as the sole basis for medical decisions. Always consult qualified healthcare professionals for medical advice.fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.4.2
-pydantic-settings==2.0.0
-sqlalchemy==2.0.23
-python-multipart==0.0.6
-requests==2.31.0
-aiohttp==3.9.1
-pandas==1.5.3
-numpy==1.24.3
-ollama==0.1.7
-asyncio
-aiofiles==23.2.1
-alembic==1.12.1
-python-json-logger==2.0.7
-structlog==23.2.0
-pytest==7.4.3
-pytest-asyncio==0.21.1
-httpx==0.25.2
-streamlit==1.28.1
-plotly==5.17.0
-altair==5.1.2
-python-docx==0.8.11
-PyPDF2==3.0.1
-Pillow==10.1.0
-google-generativeai==0.3.1
+**Disclaimer**: This system is intended for educational and research purposes only. It should not be used as the sole basis for medical decisions. Always consult qualified healthcare professionals for medical advice.

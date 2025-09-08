@@ -9,14 +9,6 @@ import os
 
 
 
-# HuggingFace imports
-try:
-    from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
-    import torch
-    HF_AVAILABLE = True
-except ImportError:
-    HF_AVAILABLE = False
-    logging.warning("HuggingFace transformers not available")
 
 # Google Gemini imports
 try:
@@ -42,31 +34,26 @@ logger = logging.getLogger(__name__)
 class PrescriptionNLPService:
     """
     NLP service for parsing medical prescriptions using:
-    1. IBM Watson Natural Language Understanding (primary)
-    2. HuggingFace medical NER models 
-    3. Google Gemini AI (fallback)
-    4. Custom rule-based extraction
+    1. Ollama AI models (primary)
+    2. Google Gemini AI (fallback)
+    3. Custom rule-based extraction
     """
     
     def __init__(self):
         self.db_path = "data/prescription_cache.db"
-        
+        self.ollama_model = "granite3.3:2b"  # Store model name separately
+
         # Initialize Ollama
-        self.ollama_client = "granite3.2-vision"
+        self.ollama_client = None
         self._init_ollama()
-        
-        # Initialize HuggingFace models
-        self.medical_ner = None
-        self.tokenizer = None
-        self._init_huggingface()
-        
+
         # Initialize Gemini
         self.gemini_model = None
         self._init_gemini()
-        
+
         # Initialize database
         self._init_database()
-        
+
         # Medical entity patterns
         self._init_patterns()
     
@@ -74,58 +61,24 @@ class PrescriptionNLPService:
         """Initialize Ollama client"""
         if not OLLAMA_AVAILABLE:
             logger.warning("Ollama SDK not available")
+            self.ollama_client = None
             return
-            
+
         try:
             host = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
             self.ollama_client = ollama.Client(host=host)
             logger.info("Ollama client initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Ollama: {str(e)}")
-    
-    def _init_huggingface(self):
-        """Initialize HuggingFace medical NER model"""
-        if not HF_AVAILABLE:
-            logger.warning("HuggingFace transformers not available")
-            return
-            
-        try:
-            # Use a medical NER model - BioMistral or clinical BERT
-            model_name = "Ishan0612/biobert-ner-disease-ncbi"  # Alternative: "BioMistral/BioMistral-7B"
-            
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForTokenClassification.from_pretrained(model_name)
-            
-            self.medical_ner = pipeline(
-                "ner",
-                model=model,
-                tokenizer=self.tokenizer,
-                aggregation_strategy="simple",
-                device=0 if torch.cuda.is_available() else -1
-            )
-            
-            logger.info(f"HuggingFace medical NER model loaded: {model_name}")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize HuggingFace model: {str(e)}")
-            
-            # Fallback to a simpler model
-            try:
-                self.medical_ner = pipeline(
-                    "ner",
-                    model="dbmdz/bert-large-cased-finetuned-conll03-english",
-                    aggregation_strategy="simple"
-                )
-                logger.info("Loaded fallback NER model")
-            except Exception as e2:
-                logger.error(f"Failed to load fallback NER model: {str(e2)}")
+            self.ollama_client = None
     
     def _init_gemini(self):
         """Initialize Google Gemini AI"""
         if not GEMINI_AVAILABLE:
             logger.warning("Google Gemini SDK not available")
+            self.gemini_model = None
             return
-            
+
         try:
             api_key = os.getenv('GEMINI_API_KEY')
             if api_key:
@@ -134,9 +87,11 @@ class PrescriptionNLPService:
                 logger.info("Google Gemini initialized successfully")
             else:
                 logger.warning("Gemini API key not found")
-                
+                self.gemini_model = None
+
         except Exception as e:
             logger.error(f"Failed to initialize Gemini: {str(e)}")
+            self.gemini_model = None
     
     def _init_database(self):
         """Initialize SQLite database for caching"""
@@ -225,25 +180,16 @@ class PrescriptionNLPService:
             processing_method = "unknown"
             
             # 1. Try Ollama (primary)
-            if self.ollama_client:
+            if self.ollama_client and hasattr(self.ollama_client, 'chat'):
                 try:
                     result = await self._parse_with_ollama(text)
                     processing_method = "ollama"
                     logger.info("Successfully parsed with Ollama")
                 except Exception as e:
                     logger.warning(f"Ollama parsing failed: {str(e)}")
-            
-            # 2. Try HuggingFace medical NER (secondary)
-            if not result and self.medical_ner:
-                try:
-                    result = await self._parse_with_huggingface(text)
-                    processing_method = "huggingface"
-                    logger.info("Successfully parsed with HuggingFace")
-                except Exception as e:
-                    logger.warning(f"HuggingFace parsing failed: {str(e)}")
-            
-            # 3. Try Gemini AI (fallback)
-            if not result and self.gemini_model:
+
+            # 2. Try Gemini AI (fallback)
+            if not result and self.gemini_model and hasattr(self.gemini_model, 'generate_content'):
                 try:
                     result = await self._parse_with_gemini(text)
                     processing_method = "gemini"
@@ -336,60 +282,6 @@ class PrescriptionNLPService:
             logger.error(f"Ollama error: {str(e)}")
             raise
     
-    async def _parse_with_huggingface(self, text: str) -> Dict[str, Any]:
-        """Parse prescription using HuggingFace medical NER"""
-        if not self.medical_ner:
-            raise Exception("HuggingFace model not initialized")
-        
-        try:
-            # Run NER on the text
-            entities = self.medical_ner(text)
-            
-            medications = []
-            symptoms = []
-            conditions = []
-            
-            # Process HuggingFace NER results
-            for entity in entities:
-                entity_type = entity.get('entity_group', '').upper()
-                text_val = entity.get('word', '').replace('##', '')  # Clean BERT tokens
-                confidence = entity.get('score', 0)
-                
-                # Map entity types to medical concepts
-                if entity_type in ['DRUG', 'MEDICATION', 'CHEMICAL']:
-                    medications.append({
-                        'name': text_val,
-                        'confidence': confidence,
-                        'source': 'huggingface_ner'
-                    })
-                elif entity_type in ['DISEASE', 'SYMPTOM']:
-                    conditions.append({
-                        'name': text_val,
-                        'confidence': confidence,
-                        'type': entity_type.lower()
-                    })
-            
-            # Use rule-based extraction to supplement HF results
-            rule_based = await self._parse_with_rules(text)
-            
-            # Combine results
-            all_medications = medications + rule_based['medications']
-            unique_medications = self._deduplicate_entities(all_medications)
-            
-            return {
-                'medications': unique_medications,
-                'dosages': rule_based['dosages'],
-                'frequencies': rule_based['frequencies'],
-                'routes': rule_based['routes'],
-                'conditions': conditions,
-                'confidence_score': self._calculate_confidence(unique_medications),
-                'warnings': self._generate_warnings(unique_medications),
-                'hf_entities': entities
-            }
-            
-        except Exception as e:
-            logger.error(f"HuggingFace NER error: {str(e)}")
-            raise
     
     async def _parse_with_gemini(self, text: str) -> Dict[str, Any]:
         """Parse prescription using Google Gemini AI"""
@@ -458,27 +350,39 @@ class PrescriptionNLPService:
     
     async def _call_gemini_async(self, prompt: str) -> str:
         """Call Gemini API asynchronously"""
+        if not self.gemini_model:
+            raise Exception("Gemini model not available")
+
         loop = asyncio.get_event_loop()
-        
+
         def _call_gemini():
-            response = self.gemini_model.generate_content(prompt)
-            return response.text
-        
+            try:
+                response = self.gemini_model.generate_content(prompt)
+                return response.text
+            except Exception as e:
+                return f"Error calling Gemini: {str(e)}"
+
         return await loop.run_in_executor(None, _call_gemini)
 
     async def _call_ollama_async(self, prompt: str) -> str:
         """Call Ollama API asynchronously"""
+        if not self.ollama_client:
+            raise Exception("Ollama client not available")
+
         loop = asyncio.get_event_loop()
 
         def _call_ollama():
-            response = self.ollama_client.chat(model='llama2', messages=[{'role': 'user', 'content': prompt}])
-            return response['message']['content']
+            try:
+                response = self.ollama_client.chat(model=self.ollama_model, messages=[{'role': 'user', 'content': prompt}])
+                return response['message']['content']
+            except Exception as e:
+                return f"Error calling Ollama: {str(e)}"
 
         return await loop.run_in_executor(None, _call_ollama)
     
     async def _parse_with_rules(self, text: str) -> Dict[str, Any]:
         """Parse prescription using rule-based regex patterns"""
-        result = {
+        result: Dict[str, Any] = {
             'medications': [],
             'dosages': [],
             'frequencies': [],
@@ -650,14 +554,7 @@ class PrescriptionNLPService:
                 entities.extend(ollama_entities)
             except Exception as e:
                 logger.warning(f"Ollama entity extraction failed: {str(e)}")
-        
-        if self.medical_ner:
-            try:
-                hf_entities = await self._extract_entities_huggingface(text)
-                entities.extend(hf_entities)
-            except Exception as e:
-                logger.warning(f"HuggingFace entity extraction failed: {str(e)}")
-        
+
         # Rule-based extraction
         rule_entities = await self._extract_entities_rules(text)
         entities.extend(rule_entities)
@@ -685,25 +582,6 @@ class PrescriptionNLPService:
     
     
     
-    async def _extract_entities_huggingface(self, text: str) -> List[Dict]:
-        """Extract entities using HuggingFace NER"""
-        entities = []
-        
-        try:
-            ner_results = self.medical_ner(text)
-            
-            for entity in ner_results:
-                entities.append({
-                    'name': entity.get('word', '').replace('##', ''),
-                    'type': entity.get('entity_group', ''),
-                    'confidence': entity.get('score', 0),
-                    'source': 'huggingface'
-                })
-                
-        except Exception as e:
-            logger.error(f"HuggingFace entity extraction error: {str(e)}")
-        
-        return entities
     
     async def _extract_entities_rules(self, text: str) -> List[Dict]:
         """Extract entities using rule-based patterns"""
