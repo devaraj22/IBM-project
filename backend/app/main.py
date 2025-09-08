@@ -1,4 +1,6 @@
 # backend/app/main.py
+import sys
+import os
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -9,15 +11,17 @@ import sqlite3
 import json
 import logging
 from datetime import datetime
-import os
 from contextlib import contextmanager
 
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # Import services
-from services.drug_service import DrugInteractionService
-from services.nlp_service import PrescriptionNLPService
-from services.dosage_service import DosageService
-from services.alternative_service import AlternativeDrugService
-from utils.config import get_settings
+from app.services.drug_service import DrugInteractionService
+from app.services.nlp_service import PrescriptionNLPService
+from app.services.dosage_service import DosageService
+from app.services.alternative_service import AlternativeDrugService
+from app.utils.config import get_settings
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -373,7 +377,7 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "app.main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,

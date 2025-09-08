@@ -12,9 +12,7 @@ aiohttp==3.9.1
 pandas==1.5.3
 numpy==1.24.3
 
-# IBM Watson
-ibm-watson==7.0.1
-ibm-cloud-sdk-core==3.18.0
+
 
 # HuggingFace & PyTorch
 transformers==4.35.2
@@ -59,12 +57,13 @@ streamlit-option-menu==0.3.6
 streamlit-authenticator==0.2.3
 
 ## .env.example
-# IBM Watson Configuration
-IBM_WATSON_API_KEY=your_watson_api_key_here
-IBM_WATSON_URL=https://api.us-south.natural-language-understanding.watson.cloud.ibm.com/instances/your-instance
+
 
 # Google Gemini Configuration  
 GEMINI_API_KEY=your_gemini_api_key_here
+
+# Ollama Configuration
+OLLAMA_HOST=http://localhost:11434
 
 # Database Configuration
 DATABASE_URL=sqlite:///./app/data/medical_ai.db
@@ -102,9 +101,9 @@ services:
       - ./backend/app/logs:/app/logs
     environment:
       - DATABASE_URL=sqlite:///./data/medical_ai.db
-      - IBM_WATSON_API_KEY=${IBM_WATSON_API_KEY}
-      - IBM_WATSON_URL=${IBM_WATSON_URL}
+      
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OLLAMA_HOST=${OLLAMA_HOST}
       - LOG_LEVEL=INFO
     networks:
       - medical-ai-network

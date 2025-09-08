@@ -7,15 +7,7 @@ from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 import os
 
-# IBM Watson imports
-try:
-    from ibm_watson import NaturalLanguageUnderstandingV1
-    from ibm_watson.natural_language_understanding_v1 import Features, EntitiesOptions, KeywordsOptions
-    from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
-    WATSON_AVAILABLE = True
-except ImportError:
-    WATSON_AVAILABLE = False
-    logging.warning("IBM Watson SDK not available")
+
 
 # HuggingFace imports
 try:
@@ -34,6 +26,14 @@ except ImportError:
     GEMINI_AVAILABLE = False
     logging.warning("Google Gemini SDK not available")
 
+# Ollama imports
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+    logging.warning("Ollama SDK not available")
+
 import aiohttp
 import sqlite3
 
@@ -51,9 +51,9 @@ class PrescriptionNLPService:
     def __init__(self):
         self.db_path = "data/prescription_cache.db"
         
-        # Initialize IBM Watson
-        self.watson_nlu = None
-        self._init_watson()
+        # Initialize Ollama
+        self.ollama_client = "granite3.2-vision"
+        self._init_ollama()
         
         # Initialize HuggingFace models
         self.medical_ner = None
@@ -70,29 +70,18 @@ class PrescriptionNLPService:
         # Medical entity patterns
         self._init_patterns()
     
-    def _init_watson(self):
-        """Initialize IBM Watson NLU"""
-        if not WATSON_AVAILABLE:
-            logger.warning("IBM Watson SDK not available")
+    def _init_ollama(self):
+        """Initialize Ollama client"""
+        if not OLLAMA_AVAILABLE:
+            logger.warning("Ollama SDK not available")
             return
             
         try:
-            api_key = os.getenv('IBM_WATSON_API_KEY')
-            service_url = os.getenv('IBM_WATSON_URL', 'https://api.us-south.natural-language-understanding.watson.cloud.ibm.com/instances/your-instance-id')
-            
-            if api_key:
-                authenticator = IAMAuthenticator(api_key)
-                self.watson_nlu = NaturalLanguageUnderstandingV1(
-                    version='2022-04-07',
-                    authenticator=authenticator
-                )
-                self.watson_nlu.set_service_url(service_url)
-                logger.info("IBM Watson NLU initialized successfully")
-            else:
-                logger.warning("IBM Watson API key not found")
-                
+            host = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
+            self.ollama_client = ollama.Client(host=host)
+            logger.info("Ollama client initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize IBM Watson: {str(e)}")
+            logger.error(f"Failed to initialize Ollama: {str(e)}")
     
     def _init_huggingface(self):
         """Initialize HuggingFace medical NER model"""
@@ -235,14 +224,14 @@ class PrescriptionNLPService:
             result = None
             processing_method = "unknown"
             
-            # 1. Try IBM Watson (primary)
-            if self.watson_nlu:
+            # 1. Try Ollama (primary)
+            if self.ollama_client:
                 try:
-                    result = await self._parse_with_watson(text)
-                    processing_method = "watson"
-                    logger.info("Successfully parsed with IBM Watson")
+                    result = await self._parse_with_ollama(text)
+                    processing_method = "ollama"
+                    logger.info("Successfully parsed with Ollama")
                 except Exception as e:
-                    logger.warning(f"Watson parsing failed: {str(e)}")
+                    logger.warning(f"Ollama parsing failed: {str(e)}")
             
             # 2. Try HuggingFace medical NER (secondary)
             if not result and self.medical_ner:
@@ -282,80 +271,69 @@ class PrescriptionNLPService:
             # Return basic rule-based parsing as fallback
             return await self._parse_with_rules(text)
     
-    async def _parse_with_watson(self, text: str) -> Dict[str, Any]:
-        """Parse prescription using IBM Watson NLU"""
-        if not self.watson_nlu:
-            raise Exception("Watson NLU not initialized")
+    async def _parse_with_ollama(self, text: str) -> Dict[str, Any]:
+        """Parse prescription using Ollama"""
+        if not self.ollama_client:
+            raise Exception("Ollama client not initialized")
         
         try:
-            response = self.watson_nlu.analyze(
-                text=text,
-                features=Features(
-                    entities=EntitiesOptions(
-                        model='en-entities',  # Use custom medical model if available
-                        limit=50
-                    ),
-                    keywords=KeywordsOptions(limit=50)
-                ),
-                language='en'
-            ).get_result()
+            prompt = f"""
+            Analyze the following medical prescription text and extract structured information. 
+            Return the results in JSON format with the following structure:
+            {{
+                "medications": [
+                    {{"name": "medication_name", "confidence": 0.0-1.0}}
+                ],
+                "dosages": [
+                    {{"amount": "amount", "unit": "unit", "medication": "medication_name"}}
+                ],
+                "frequencies": ["frequency_descriptions"],
+                "routes": ["administration_routes"],
+                "indications": ["medical_conditions_being_treated"]
+            }}
+
+            Prescription text: "{text}"
             
-            # Process Watson response
-            medications = []
-            dosages = []
-            frequencies = []
-            routes = []
+            Extract only the medical information present in the text. Do not make assumptions.
+            """
             
-            # Extract entities
-            entities = response.get('entities', [])
-            keywords = response.get('keywords', [])
+            response = await self._call_ollama_async(prompt)
             
-            # Process entities to identify medical concepts
-            for entity in entities:
-                entity_type = entity.get('type', '').lower()
-                text_val = entity.get('text', '')
-                confidence = entity.get('confidence', 0)
+            # Parse Ollama response
+            try:
+                # Extract JSON from response
+                json_start = response.find('{')
+                json_end = response.rfind('}') + 1
                 
-                # Map Watson entity types to medical concepts
-                if entity_type in ['organization', 'other'] and self._is_medication(text_val):
-                    medications.append({
-                        'name': text_val,
-                        'confidence': confidence,
-                        'source': 'watson_entities'
-                    })
-            
-            # Process keywords for additional medical terms
-            for keyword in keywords:
-                text_val = keyword.get('text', '')
-                relevance = keyword.get('relevance', 0)
-                
-                if self._is_medication(text_val):
-                    medications.append({
-                        'name': text_val,
-                        'confidence': relevance,
-                        'source': 'watson_keywords'
-                    })
-            
-            # Use rule-based extraction to supplement Watson results
-            rule_based = await self._parse_with_rules(text)
-            
-            # Combine and deduplicate results
-            all_medications = medications + rule_based['medications']
-            unique_medications = self._deduplicate_entities(all_medications)
-            
-            return {
-                'medications': unique_medications,
-                'dosages': rule_based['dosages'],
-                'frequencies': rule_based['frequencies'],
-                'routes': rule_based['routes'],
-                'confidence_score': self._calculate_confidence(unique_medications),
-                'warnings': self._generate_warnings(unique_medications),
-                'watson_entities': entities,
-                'watson_keywords': keywords
-            }
+                if json_start >= 0 and json_end > json_start:
+                    json_str = response[json_start:json_end]
+                    ollama_result = json.loads(json_str)
+                    
+                    # Add confidence and source information
+                    if 'medications' in ollama_result:
+                        for med in ollama_result['medications']:
+                            med['source'] = 'ollama'
+                            if 'confidence' not in med:
+                                med['confidence'] = 0.8  # Default confidence for Ollama
+                    
+                    ollama_result['confidence_score'] = self._calculate_confidence(
+                        ollama_result.get('medications', [])
+                    )
+                    ollama_result['warnings'] = self._generate_warnings(
+                        ollama_result.get('medications', [])
+                    )
+                    
+                    return ollama_result
+                else:
+                    raise ValueError("No valid JSON in Ollama response")
+                    
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Failed to parse Ollama JSON response: {str(e)}")
+                # Fall back to rule-based extraction
+                return await self._parse_with_rules(text)
             
         except Exception as e:
-            logger.error(f"Watson NLU error: {str(e)}")
+            logger.error(f"Ollama error: {str(e)}")
             raise
     
     async def _parse_with_huggingface(self, text: str) -> Dict[str, Any]:
@@ -487,6 +465,16 @@ class PrescriptionNLPService:
             return response.text
         
         return await loop.run_in_executor(None, _call_gemini)
+
+    async def _call_ollama_async(self, prompt: str) -> str:
+        """Call Ollama API asynchronously"""
+        loop = asyncio.get_event_loop()
+
+        def _call_ollama():
+            response = self.ollama_client.chat(model='llama2', messages=[{'role': 'user', 'content': prompt}])
+            return response['message']['content']
+
+        return await loop.run_in_executor(None, _call_ollama)
     
     async def _parse_with_rules(self, text: str) -> Dict[str, Any]:
         """Parse prescription using rule-based regex patterns"""
@@ -656,12 +644,12 @@ class PrescriptionNLPService:
         entities = []
         
         # Try all available NLP methods
-        if self.watson_nlu:
+        if self.ollama_client:
             try:
-                watson_entities = await self._extract_entities_watson(text)
-                entities.extend(watson_entities)
+                ollama_entities = await self._extract_entities_ollama(text)
+                entities.extend(ollama_entities)
             except Exception as e:
-                logger.warning(f"Watson entity extraction failed: {str(e)}")
+                logger.warning(f"Ollama entity extraction failed: {str(e)}")
         
         if self.medical_ner:
             try:
@@ -675,31 +663,27 @@ class PrescriptionNLPService:
         entities.extend(rule_entities)
         
         return self._deduplicate_entities(entities)
-    
-    async def _extract_entities_watson(self, text: str) -> List[Dict]:
-        """Extract entities using Watson NLU"""
+
+    async def _extract_entities_ollama(self, text: str) -> List[Dict]:
+        """Extract entities using Ollama"""
         entities = []
         
         try:
-            response = self.watson_nlu.analyze(
-                text=text,
-                features=Features(
-                    entities=EntitiesOptions(limit=50)
-                )
-            ).get_result()
-            
-            for entity in response.get('entities', []):
-                entities.append({
-                    'name': entity.get('text', ''),
-                    'type': entity.get('type', ''),
-                    'confidence': entity.get('confidence', 0),
-                    'source': 'watson'
-                })
-                
+            parsed_data = await self._parse_with_ollama(text)
+            if 'medications' in parsed_data:
+                for med in parsed_data['medications']:
+                    entities.append({
+                        'name': med['name'],
+                        'type': 'MEDICATION',
+                        'confidence': med['confidence'],
+                        'source': 'ollama'
+                    })
         except Exception as e:
-            logger.error(f"Watson entity extraction error: {str(e)}")
+            logger.error(f"Ollama entity extraction error: {str(e)}")
         
         return entities
+    
+    
     
     async def _extract_entities_huggingface(self, text: str) -> List[Dict]:
         """Extract entities using HuggingFace NER"""
