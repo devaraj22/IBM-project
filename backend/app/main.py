@@ -30,6 +30,7 @@ from app.services.drug_service import DrugInteractionService
 from app.services.nlp_service import PrescriptionNLPService
 from app.services.dosage_service import DosageService
 from app.services.alternative_service import AlternativeDrugService
+from app.services.api_drugs_service import MedicalAPIDrugService
 from app.utils.config import get_settings
 
 # Initialize FastAPI app
@@ -83,6 +84,27 @@ class AlternativeRequest(BaseModel):
     allergies: List[str] = Field(default=[], description="Patient allergies")
     patient_age: Optional[int] = Field(None, description="Patient age")
 
+class DrugInfoRequest(BaseModel):
+    drug_name: str = Field(..., description="Name of the drug to search for")
+    use_api: Optional[bool] = Field(True, description="Whether to use external APIs for data")
+
+class ComprehensiveDrugResponse(BaseModel):
+    drug_name: str
+    sources_used: List[str]
+    data_quality: str
+    confidence_score: float
+    brand_name: Optional[List[str]]
+    generic_name: Optional[List[str]]
+    usage: Optional[str]
+    mechanism_of_action: Optional[List[str]]
+    warnings: Optional[List[str]]
+    adverse_reactions: Optional[List[str]]
+    contraindications: Optional[List[str]]
+    last_updated: str
+    molecular_formula: Optional[str]
+    molecular_weight: Optional[float]
+    standard_names: Optional[List[Dict]]
+
 class DrugInteractionResponse(BaseModel):
     interactions: List[Dict[str, Any]]
     safe: bool
@@ -112,6 +134,7 @@ drug_service = DrugInteractionService()
 nlp_service = PrescriptionNLPService()
 dosage_service = DosageService()
 alternative_service = AlternativeDrugService()
+api_drug_service = MedicalAPIDrugService()
 
 # Health check endpoint
 @app.get("/health")
@@ -151,6 +174,14 @@ async def health_check():
     except Exception as e:
         services_status["alternative_drugs"] = "error"
         logger.error(f"Alternative service error: {str(e)}")
+
+    try:
+        # Test API drug service
+        await api_drug_service.initialize()
+        services_status["api_drugs"] = "operational"
+    except Exception as e:
+        services_status["api_drugs"] = "error"
+        logger.error(f"API Drug service error: {str(e)}")
 
     # Overall status
     overall_status = "healthy" if all(status == "operational" for status in services_status.values()) else "degraded"
@@ -418,18 +449,216 @@ async def search_drugs(query: str, limit: int = 10):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/drug-info/{drug_name}")
-async def get_drug_information(drug_name: str):
+async def get_drug_information(drug_name: str, use_api: Optional[bool] = None):
     """
     Get comprehensive drug information
+    Now supports API-first approach with optional parameter
     """
     try:
+        # If API usage is explicitly requested, use the new API service
+        if use_api is True:
+            api_result = await api_drug_service.get_drug_with_fallback(drug_name)
+            if api_result:
+                return api_result
+
+        # Default behavior: try local database first, then fall back to APIs
         info = await drug_service.get_drug_info(drug_name)
-        if not info:
-            raise HTTPException(status_code=404, detail="Drug not found")
-        return info
+        if info:
+            # Mark that this came from local database if API was enabled
+            if use_api is not False:  # use_api is None or True
+                info['data_source'] = 'local_database_enhanced'
+            return info
+
+        # If no local data and APIs weren't explicitly disabled, try APIs as fallback
+        if use_api is not False:
+            logger.info(f"No local data for {drug_name}, trying APIs")
+            api_result = await api_drug_service.get_drug_with_fallback(drug_name)
+            if api_result:
+                return api_result
+
+        # No data found anywhere
+        raise HTTPException(status_code=404, detail=f"No information found for {drug_name}")
+
     except Exception as e:
         logger.error(f"Error getting drug info: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== API-DRIVEN DRUG ENDPOINTS ====================
+
+@app.post("/api-drug-info")
+async def get_api_drug_information(request: DrugInfoRequest):
+    """
+    Get comprehensive drug information using multiple free APIs (OpenFDA, PubChem, RxNorm)
+    API-First approach with local database fallback
+    """
+    try:
+        logger.info(f"🔍 Getting comprehensive API drug data for: {request.drug_name}")
+
+        if request.use_api:
+            # Use API-first approach with fallback
+            api_result = await api_drug_service.get_drug_with_fallback(request.drug_name)
+        else:
+            # Use only local fallback
+            local_result = await drug_service.get_drug_info(request.drug_name)
+            if local_result:
+                api_result = {
+                    'drug_name': request.drug_name,
+                    'source': 'local_database_only',
+                    'data_quality': 'local',
+                    'confidence_score': 0.7,
+                    **local_result
+                }
+            else:
+                raise HTTPException(status_code=404, detail=f"No information found for {request.drug_name}")
+
+        return api_result
+
+    except Exception as e:
+        logger.error(f"Error getting API drug info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving drug information: {str(e)}")
+
+@app.get("/api-drug-search/{query}")
+async def search_api_drugs(query: str, sources: Optional[str] = None):
+    """
+    Search for drugs using free APIs with enhanced data
+    Parameters:
+    - query: Partial drug name or chemical identifier
+    - sources: Comma-separated list of sources (openfda, pubchem, rxnorm). Default: all sources
+    """
+    try:
+        logger.info(f"🔍 API drug search for: {query}")
+
+        # Parse sources parameter
+        requested_sources = sources.split(',') if sources else ['openfda', 'pubchem', 'rxnorm']
+
+        search_results = {
+            'query': query,
+            'sources_searched': requested_sources,
+            'comprehensive_results': []
+        }
+
+        # Try comprehensive API search first
+        try:
+            comprehensive_data = await api_drug_service.get_drug_with_fallback(query)
+
+            if comprehensive_data and comprehensive_data.get('confidence_score', 0) > 0.6:
+                search_results['comprehensive_results'].append({
+                    'drug': query,
+                    'data': comprehensive_data,
+                    'search_method': 'comprehensive_api_search'
+                })
+        except Exception as api_error:
+            logger.warning(f"API comprehensive search failed: {str(api_error)}")
+
+        # Also search in local database as additional source
+        local_info = await drug_service.get_drug_info(query)
+        if local_info:
+            search_results['comprehensive_results'].append({
+                'drug': query,
+                'data': {**local_info, 'source': 'local_database'},
+                'search_method': 'local_database'
+            })
+
+        return search_results
+
+    except Exception as e:
+        logger.error(f"Error in API drug search: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error in drug search: {str(e)}")
+
+@app.get("/drug-comparison/{drug1}/{drug2}")
+async def compare_drugs_api(drug1: str, drug2: str):
+    """
+    Compare two drugs using API data from multiple sources
+    """
+    try:
+        logger.info(f"🔍 Comparing drugs: {drug1} vs {drug2}")
+
+        # Get data for both drugs
+        drug1_data = await api_drug_service.get_drug_with_fallback(drug1)
+        drug2_data = await api_drug_service.get_drug_with_fallback(drug2)
+
+        comparison = {
+            'drug1': drug1,
+            'drug2': drug2,
+            'comparison_data': {
+                'drug1_info': drug1_data,
+                'drug2_info': drug2_data,
+                'comparison_timestamp': datetime.utcnow().isoformat(),
+                'comparison_sources': 'multiple_free_apis'
+            },
+            'similarities': [],
+            'differences': []
+        }
+
+        # Simple comparison logic
+        if drug1_data and drug2_data:
+            # Compare manufacturers/brands
+            drug1_brand = drug1_data.get('brand_name', [])
+            drug2_brand = drug2_data.get('brand_name', [])
+
+            if set(drug1_brand) & set(drug2_brand):
+                comparison['similarities'].append("Shared brand names or manufacturers")
+
+            # Compare molecular weights if available
+            drug1_mw = drug1_data.get('molecular_weight')
+            drug2_mw = drug2_data.get('molecular_weight')
+
+            if drug1_mw and drug2_mw:
+                mw_diff = abs(drug1_mw - drug2_mw)
+                if mw_diff < 10:
+                    comparison['similarities'].append(f"Similar molecular weight ({drug1_mw:.1f} vs {drug2_mw:.1f})")
+                else:
+                    comparison['differences'].append(f"Different molecular weight ({drug1_mw:.1f} vs {drug2_mw:.1f})")
+
+        return comparison
+
+    except Exception as e:
+        logger.error(f"Error comparing drugs: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error comparing drugs: {str(e)}")
+
+@app.get("/drug-stats")
+async def get_api_drug_stats():
+    """
+    Get statistics about API drug data usage and availability
+    """
+    try:
+        stats = {
+            'api_services': ['OpenFDA_API', 'PubChem_API', 'RxNorm_API'],
+            'service_status': 'all_free_public_apis',
+            'data_sources': [
+                {
+                    'name': 'US FDA Drug Label Database',
+                    'purpose': 'Official drug labeling, usage, warnings, contraindications',
+                    'accessibility': 'Public API - No authentication required'
+                },
+                {
+                    'name': 'PubChem Chemical Database',
+                    'purpose': 'Chemical structure, molecular formula, pharmacological data',
+                    'accessibility': 'Public API - No authentication required'
+                },
+                {
+                    'name': 'RxNorm Drug Standardization',
+                    'purpose': 'Standardized drug names, coding, therapeutic classifications',
+                    'accessibility': 'Public API - No authentication required'
+                }
+            ],
+            'last_updated': datetime.utcnow().isoformat(),
+            'api_features': [
+                'Real-time data from authoritative sources',
+                'Comprehensive drug information',
+                'Multiple source validation',
+                'Automatic fallback to local database',
+                '400+ million chemical compounds in PubChem',
+                'Quarterly updated FDA data',
+                'International drug name standardization'
+            ]
+        }
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Error getting API stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting statistics: {str(e)}")
 
 # Analytics and monitoring endpoints
 @app.get("/analytics/usage")
@@ -681,7 +910,14 @@ async def startup_event():
     await nlp_service.initialize()
     await dosage_service.initialize()
     await alternative_service.initialize()
-    
+    await api_drug_service.initialize()
+
+    # Set up API service fallback to local drug service
+    api_drug_service.set_fallback_service(drug_service)
+
+    # Link API service to dosage service for unknown drugs
+    dosage_service.set_api_service(api_drug_service)
+
     logger.info("All services initialized successfully")
 
 # Shutdown event
@@ -697,6 +933,7 @@ async def shutdown_event():
     await nlp_service.cleanup()
     await dosage_service.cleanup()
     await alternative_service.cleanup()
+    await api_drug_service.cleanup()
 
 if __name__ == "__main__":
     uvicorn.run(
