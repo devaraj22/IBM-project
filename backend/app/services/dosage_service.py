@@ -13,10 +13,13 @@ logger = logging.getLogger(__name__)
 class DosageService:
     """
     Service for calculating age-specific medication dosages
+    Now with API integration for unknown drugs
     """
-    
+
     def __init__(self):
         self.db_path = "data/dosage_database.db"
+        self.api_service = None  # Will be set by main.py
+        self.logger = logging.getLogger(__name__)
         self._init_database()
         
     def _init_database(self):
@@ -219,52 +222,61 @@ class DosageService:
                 adj["adjustment_factor"], adj["adjustment_description"], adj.get("contraindicated", False)
             ))
     
+    def set_api_service(self, api_service):
+        """Set the API service for fallback drug data"""
+        self.api_service = api_service
+        logger.info("API service linked to Dosage Service")
+
     async def initialize(self):
         """Initialize the dosage service"""
         logger.info("Initializing Dosage Service")
-    
+
     async def cleanup(self):
         """Cleanup resources"""
         pass
     
-    async def calculate_dosage(self, drug_name: str, age: int, weight: float, 
-                             indication: Optional[str] = None, 
-                             kidney_function: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Calculate age and weight-specific dosage"""
-        
+    async def calculate_dosage(self, drug_name: str, age: int, weight: float,
+                              indication: Optional[str] = None,
+                              kidney_function: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Calculate age and weight-specific dosage with API fallback"""
+
         try:
             # Determine age group
             age_group = self._determine_age_group(age)
-            
-            # Get base dosage information
+
+            # Get base dosage information from local database
             dosage_info = self._get_dosage_info(drug_name.lower(), age_group, age)
-            
-            if not dosage_info:
-                return None
-            
-            # Calculate dose based on weight if needed
-            calculated_dose = self._calculate_dose(dosage_info, weight, age)
-            
-            # Apply adjustments
-            adjusted_dose, adjustments, warnings = await self._apply_adjustments(
-                drug_name, calculated_dose, age, kidney_function
-            )
-            
-            return {
-                "drug_name": drug_name.title(),
-                "recommended_dose": adjusted_dose,
-                "unit": dosage_info["unit"],
-                "frequency": dosage_info["frequency"],
-                "route": dosage_info["route"],
-                "age_group": age_group,
-                "weight_based": dosage_info["weight_based"],
-                "base_calculation": calculated_dose,
-                "adjustments": adjustments,
-                "warnings": warnings,
-                "max_daily_dose": self._calculate_max_daily(dosage_info, weight),
-                "indication": indication
-            }
-            
+
+            if dosage_info:
+                # Use local dosage data
+                calculated_dose = self._calculate_dose(dosage_info, weight, age)
+                adjusted_dose, adjustments, warnings = await self._apply_adjustments(
+                    drug_name, calculated_dose, age, kidney_function
+                )
+
+                result = {
+                    "drug_name": drug_name.title(),
+                    "recommended_dose": adjusted_dose,
+                    "unit": dosage_info["unit"],
+                    "frequency": dosage_info["frequency"],
+                    "route": dosage_info["route"],
+                    "age_group": age_group,
+                    "weight_based": dosage_info["weight_based"],
+                    "base_calculation": calculated_dose,
+                    "adjustments": adjustments,
+                    "warnings": warnings,
+                    "max_daily_dose": self._calculate_max_daily(dosage_info, weight),
+                    "indication": indication,
+                    "data_source": "local_database",
+                    "confidence_level": "high"
+                }
+            else:
+                # Local data not found - try API fallback
+                logger.info(f"No local dosage data for {drug_name}, attempting API fallback")
+                result = await self._generate_api_based_dosage(drug_name, age, weight, age_group, indication, kidney_function)
+
+            return result
+
         except Exception as e:
             logger.error(f"Error calculating dosage: {str(e)}")
             return None
@@ -423,7 +435,219 @@ class DosageService:
             logger.error(f"Error applying adjustments: {str(e)}")
         
         return adjusted_dose, adjustments, warnings
-    
+
+    async def _generate_api_based_dosage(self, drug_name: str, age: int, weight: float,
+                                        age_group: str, indication: Optional[str],
+                                        kidney_function: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Generate estimated dosage based on API drug data"""
+
+        if not self.api_service:
+            logger.warning("API service not available for dosage fallback")
+            return None
+
+        try:
+            # Get comprehensive drug data from APIs
+            api_data = await self.api_service.get_drug_with_fallback(drug_name)
+
+            estimated_dosage = None
+
+            # Try API data first if confidence is reasonable
+            if api_data and api_data.get('confidence_score', 0) >= 0.3:
+                estimated_dosage = self._extract_dosage_from_api(api_data, age, weight, age_group)
+                logger.info(f"Generated API-based dosage for {drug_name}")
+
+            # If API data extraction failed, try name-based estimation
+            if not estimated_dosage:
+                logger.info(f"No API data reliable for {drug_name}, using name-based estimation")
+                estimated_dosage = self._generate_name_based_estimation(drug_name, age, weight, age_group)
+
+            if not estimated_dosage:
+                logger.warning(f"Failed to generate any dosage estimate for {drug_name}")
+                return None
+
+            # Apply adjustments based on patient factors
+            adjusted_dose, adjustments, warnings = await self._apply_adjustments(
+                drug_name, estimated_dosage['base_dose'], age, kidney_function
+            )
+
+            # Add API-specific warnings
+            warnings.append("⚠️ Dosage estimate based on available API data - consult healthcare provider")
+            warnings.append("📊 Confidence level: moderate (API-derived estimation)")
+
+            return {
+                "drug_name": drug_name.title(),
+                "recommended_dose": adjusted_dose,
+                "unit": estimated_dosage["unit"],
+                "frequency": estimated_dosage["frequency"],
+                "route": estimated_dosage["route"],
+                "age_group": age_group,
+                "weight_based": estimated_dosage["weight_based"],
+                "base_calculation": estimated_dosage['base_dose'],
+                "adjustments": adjustments,
+                "warnings": warnings,
+                "max_daily_dose": estimated_dosage['max_daily_dose'],
+                "indication": indication,
+                "data_source": f"api_derived ({api_data.get('sources_used', [])})",
+                "confidence_level": "moderate - api_estimated",
+                "api_confidence": api_data.get('confidence_score', 0)
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating API-based dosage: {str(e)}")
+            return None
+
+    def _extract_dosage_from_api(self, api_data: Dict, age: int, weight: float, age_group: str) -> Optional[Dict]:
+        """Extract and estimate dosage from API drug data"""
+
+        # Get drug usage information from API
+        usage = api_data.get('usage', '').lower()
+        drug_class = api_data.get('drug_class', '').lower() if 'drug_class' in api_data else ''
+
+        # Analgesic/Pain relief (acetaminophen-like)
+        if 'pain' in usage or 'analgesic' in usage or 'headache' in usage:
+            if age < 12:
+                base_dose = 10.0  # mg/kg
+                unit = "mg/kg"
+                weight_based = True
+                frequency = "every 4-6 hours"
+            elif age < 65:
+                base_dose = 325.0 if weight < 80 else 500.0  # mg
+                unit = "mg"
+                weight_based = False
+                frequency = "every 4-6 hours"
+            else:
+                base_dose = 325.0  # mg - lower dose for elderly
+                unit = "mg"
+                weight_based = False
+                frequency = "every 6-8 hours"
+
+        # Antibiotic/Infection treatment (amoxicillin-like)
+        elif 'antibiotic' in usage or 'infection' in usage or 'bacterial' in usage:
+            if age < 12:
+                base_dose = 25.0  # mg/kg/day
+                unit = "mg/kg/day"
+                weight_based = True
+                frequency = "divided twice daily"
+            else:
+                base_dose = 250.0 if weight < 70 else 500.0  # mg
+                unit = "mg"
+                weight_based = False
+                frequency = "three times daily"
+
+        # Gastrointestinal/Acid related (omeprazole-like)
+        elif 'heartburn' in usage or 'acid' in usage or 'stomach' in usage or 'ulcer' in usage:
+            base_dose = 20.0 if age >= 18 else 10.0  # mg
+            unit = "mg"
+            weight_based = False
+            frequency = "once daily"
+
+        # Default adult oral medication
+        elif age >= 18:
+            base_dose = 100.0  # Conservative default
+            unit = "mg"
+            weight_based = False
+            frequency = "twice daily"
+
+        # Pediatric default
+        elif age >= 2:
+            base_dose = 5.0  # mg/kg conservative
+            unit = "mg/kg"
+            weight_based = True
+            frequency = "twice daily"
+
+        else:
+            # Infant - very conservative
+            base_dose = 2.5  # mg/kg very conservative
+            unit = "mg/kg"
+            weight_based = True
+            frequency = "twice daily"
+
+        # Calculate max daily dose
+        if unit.endswith("/kg") or unit.endswith("/kg/day"):
+            max_daily_dose = base_dose * 2 * weight if weight_based else base_dose * 2
+        else:
+            max_daily_dose = base_dose * 4  # Conservative multiple for safety
+
+        return {
+            'base_dose': base_dose,
+            'unit': unit,
+            'frequency': frequency,
+            'route': 'oral',  # Most common, could be enhanced
+            'weight_based': weight_based,
+            'max_daily_dose': max_daily_dose
+        }
+
+    def _generate_name_based_estimation(self, drug_name: str, age: int, weight: float, age_group: str) -> Optional[Dict]:
+        """Generate estimated dosage based on drug name analysis when APIs fail"""
+
+        drug_lower = drug_name.lower()
+
+        # Analgesic/Pain medications
+        if 'enzoflam' in drug_lower or 'ibuprofen' in drug_lower or 'pain' in drug_lower or 'inflammation' in drug_lower:
+            # NSAIDs - similar to ibuprofen
+            if age < 12:
+                base_dose = 5.0  # mg/kg
+                unit = "mg/kg"
+                weight_based = True
+                frequency = "every 6-8 hours"  # Less frequent than acetaminophen
+                max_daily_dose = 40.0  # mg/kg/day max
+            else:
+                base_dose = 200.0 if weight < 70 else 400.0  # mg
+                unit = "mg"
+                weight_based = False
+                frequency = "three times daily"
+                max_daily_dose = 1200.0  # mg/day typical max
+
+        # Pancreatic enzymes
+        elif 'pan-d' in drug_lower or 'pancreas' in drug_lower or 'enzyme' in drug_lower:
+            # Similar to Creon/Pancrelipase
+            base_dose = 20000.0 if age < 4 else 40000.0  # units
+            unit = "units"
+            weight_based = False
+            frequency = "with each meal"
+            # Note: pancreatic enzymes are not weight-based typically
+            max_daily_dose = 120000.0  # units/day
+
+        # Local anesthetics/Topical
+        elif 'hexigel' in drug_lower or 'gum paint' in drug_lower or 'gel' in drug_lower or 'local' in drug_lower:
+            # Topical anesthetic - similar to lidocaine gel
+            base_dose = 1.0  # Application based, not weight based
+            unit = "application"
+            weight_based = False
+            frequency = "apply 2-3 times daily"
+            max_daily_dose = 3.0  # applications per day
+
+        # Default conservative estimation for unknown drugs
+        else:
+            logger.warning(f"No classification found for {drug_name}, using ultra-conservative defaults")
+            if age < 12:
+                base_dose = 1.0  # mg/kg very conservative
+                unit = "mg/kg"
+                weight_based = True
+                frequency = "once daily"
+                max_daily_dose = 5.0  # mg/kg/day very conservative
+            else:
+                base_dose = 10.0  # mg very conservative
+                unit = "mg"
+                weight_based = False
+                frequency = "once daily"
+                max_daily_dose = 30.0  # mg/day very conservative
+
+        # Calculate max daily dose properly
+        if weight_based and 'kg' in unit:
+            max_calculated = max_daily_dose / weight
+        else:
+            max_calculated = max_daily_dose
+
+        return {
+            'base_dose': base_dose,
+            'unit': unit,
+            'frequency': frequency,
+            'route': 'oral',  # Most common, could be topical for some
+            'weight_based': weight_based,
+            'max_daily_dose': max_calculated
+        }
+
     async def get_guidelines(self, drug_name: str) -> Optional[Dict]:
         """Get dosing guidelines for a drug"""
         try:

@@ -529,10 +529,7 @@ def show_drug_interaction_page():
                     drugs = st.session_state['analyzed_drugs']
                     use_analyzed_drugs = True
 
-                    # Option to use different drugs (outside the form)
-                    if st.button("✏️ Enter Different Drugs", key="switch_manual_drugs"):
-                        st.session_state['use_manual_drugs'] = True
-                        st.rerun()
+                    # Button will be placed after the form
 
                 else:
                     st.session_state['use_manual_drugs'] = False
@@ -613,10 +610,10 @@ def show_drug_interaction_page():
             st.error("❌ Please enter at least 2 medications to check for interactions")
         else:
             st.subheader(f"🔍 Analyzing {len(drugs)} medications...")
-            
+
             # Display selected drugs
             st.write("**Selected medications:**", ", ".join(drugs))
-            
+
             with st.spinner("Checking drug interactions..."):
                 # Prepare API request
                 request_data = {
@@ -624,23 +621,23 @@ def show_drug_interaction_page():
                     "patient_age": patient_age,
                     "severity_filter": severity_filter.lower() if severity_filter else None
                 }
-                
+
                 # Make API call
                 result = make_api_request("/check-interactions", method="POST", data=request_data)
-                
+
                 if result:
                     interactions = result.get('interactions', [])
                     safe = result.get('safe', True)
                     risk_level = result.get('risk_level', 'unknown')
                     recommendations = result.get('recommendations', [])
-                    
+
                     # Filter minor interactions if not requested
                     if not include_minor:
                         interactions = [i for i in interactions if i.get('severity', '').lower() != 'minor']
-                    
+
                     # Display results
                     display_interaction_results(interactions, safe, risk_level, recommendations)
-                    
+
                     # Save to history
                     st.session_state.analysis_history.append({
                         'timestamp': datetime.now(),
@@ -648,35 +645,41 @@ def show_drug_interaction_page():
                         'input': drugs,
                         'result': result
                     })
-                    
+
                     # Export options
                     if interactions:
                         st.subheader("📤 Export Results")
-                        
+
                         col1, col2 = st.columns(2)
-                        
+
                         with col1:
                             # Create CSV export
                             df_interactions = pd.DataFrame(interactions)
                             csv_data = df_interactions.to_csv(index=False)
-                            
+
                             st.download_button(
                                 "📥 Download CSV Report",
                                 data=csv_data,
                                 file_name=f"drug_interactions_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                                 mime="text/csv"
                             )
-                        
+
                         with col2:
                             # Create JSON export
                             json_data = json.dumps(result, indent=2)
-                            
+
                             st.download_button(
                                 "📥 Download JSON Report",
                                 data=json_data,
                                 file_name=f"drug_interactions_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
                                 mime="application/json"
                             )
+
+    # Button to switch from analyzed drugs to manual drugs (outside the form)
+    if 'analyzed_drugs' in st.session_state and not st.session_state.get('use_manual_drugs', False) and use_analyzed_drugs:
+        if st.button("✏️ Enter Different Drugs", key="switch_manual_drugs"):
+            st.session_state['use_manual_drugs'] = True
+            st.rerun()
 
 def show_dosage_page():
     """Age-specific dosage calculator page"""
