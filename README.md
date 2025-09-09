@@ -15,7 +15,7 @@ A comprehensive AI-powered system for medical prescription verification, drug in
 ### Backend (FastAPI)
 - **FastAPI**: High-performance API framework
 - **SQLite/PostgreSQL**: Database for caching and storage
-- **Ollama**: Primary NLP processing (using granite3.2-vision model)
+- **Ollama**: Primary NLP processing (using granite3.3:2b model)
 - **Google Gemini AI**: Fallback AI processing
 - **RxNorm API**: Drug terminology and interactions
 - **OpenFDA**: Adverse event data
@@ -30,7 +30,7 @@ A comprehensive AI-powered system for medical prescription verification, drug in
 
 - Python 3.8+
 - Docker (for containerized deployment)
-- Ollama (for local AI processing) with granite3.2-vision model
+- Ollama (for local AI processing) with granite3.3:2b model
 
 ## 🔧 Installation
 
@@ -74,8 +74,8 @@ cp .env.example .env
 4. **Ollama Setup**
 ```bash
 # Install Ollama from https://ollama.com/
-# Pull the granite3.2-vision model
-ollama pull granite3.2-vision
+# Pull the granite3.3:2b model
+ollama pull granite3.3:2b
 ```
 
 ## 🚀 Running the Application
@@ -153,20 +153,7 @@ cd frontend
 pytest tests/
 ```
 
-### Integration Tests
-```bash
-# Test Ollama model name
-python test_ollama_model.py
 
-# Test NLP service without Hugging Face
-python test_nlp_service.py
-
-# Test with Context7 approach
-python test_with_context7.py
-
-# Test with Playwright
-python test_with_playwright.py
-```
 
 ## 📊 Monitoring
 
@@ -184,22 +171,16 @@ The system includes built-in monitoring and analytics:
 4. Add tests
 5. Submit a pull request
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-- Ollama for local AI processing with granite3.2-vision model
+- Ollama for local AI processing with granite3.3: model
 - Google for Gemini AI
 - OpenFDA for adverse event data
 - RxNorm for drug terminology
 
-## 📞 Support
 
 For support and questions:
-- 📧 Email: support@medical-ai.com  
-- 📖 Documentation: [docs/](docs/)
 - 🐛 Issues: [GitHub Issues](https://github.com/your-org/ai-medical-prescription-verification/issues)
 
 ---
